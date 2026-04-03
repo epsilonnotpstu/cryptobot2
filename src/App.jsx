@@ -446,7 +446,6 @@ function normalizeAuthErrorMessage(message = "") {
   if (/the page could not be found|not_found/i.test(message)) {
     return "Auth API route পাওয়া যায়নি. Vercel deploy-এ `api/auth/...` files include হয়েছে কিনা check করে redeploy করো.";
   }
-
   if (/smtp|invalid login|535|sender/i.test(message)) {
     return "OTP email service configured হয়নি. SMTP login/key বা verified sender ঠিক করতে হবে, তারপর আবার চেষ্টা করো.";
   }
@@ -496,7 +495,6 @@ async function parseErrorPayload(response) {
     rawText: text,
   };
 }
-
 async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}) {
   const candidates = getApiBaseCandidates();
   let lastNetworkError = null;
