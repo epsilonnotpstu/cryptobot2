@@ -13,7 +13,7 @@ const ROUTES = {
 
 const AUTH_CONFIG = {
   useRemote: true,
-  apiBase: (import.meta.env.VITE_API_BASE_URL || "http://localhost:4000").trim(),
+  apiBase: (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "http://localhost:4000" : "")).trim(),
 };
 
 const AUTH_STORAGE_KEYS = {
@@ -241,7 +241,29 @@ function buildFetchErrorMessage() {
   if (isNativeAppRuntime()) {
     return "API reach করা যাচ্ছে না. Mobile app-এর জন্য backend server চালু রাখো, .env-এ VITE_API_BASE_URL-এ PC/LAN IP দাও, AndroidManifest.xml-এ usesCleartextTraffic=true রাখো, তারপর npm run cap:sync করে app rebuild করো.";
   }
+
+  if (typeof window !== "undefined" && !isLocalBrowserHost()) {
+    return "Backend reach করা যাচ্ছে না. Vercel deploy হলে একই project-এর `/api` function live আছে কিনা check করো. যদি external backend ব্যবহার করো, `VITE_API_BASE_URL`-এ public HTTPS URL দিয়ে frontend redeploy করো.";
+  }
+
   return "Backend server reach করা যাচ্ছে না. npm run server:start বা npm run dev:all চালু আছে কিনা check করো.";
+}
+
+function isLocalBrowserHost() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const hostname = window.location.hostname;
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0";
+}
+
+function isLoopbackApiBase(apiBase = "") {
+  const normalized = (apiBase || "").trim().replace(/\/+$/, "");
+  return (
+    /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$/i.test(normalized) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?\//i.test(normalized)
+  );
 }
 
 function readStoredApiBase() {
@@ -304,19 +326,25 @@ function getApiBaseCandidates() {
   const configuredBase = (AUTH_CONFIG.apiBase || "").trim().replace(/\/+$/, "");
   const storedBase = readStoredApiBase();
   const candidates = [];
+  const localHost = isLocalBrowserHost();
 
   if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-
     if (!isNativeAppRuntime()) {
       pushCandidate(candidates, "");
-      pushCandidate(candidates, storedBase);
-      pushCandidate(candidates, configuredBase);
-      if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
-        pushCandidate(candidates, `http://${hostname}:4000`);
+
+      if (localHost) {
+        pushCandidate(candidates, storedBase);
+        pushCandidate(candidates, configuredBase);
+        pushCandidate(candidates, "http://localhost:4000");
+        pushCandidate(candidates, "http://127.0.0.1:4000");
+      } else {
+        if (!isLoopbackApiBase(storedBase)) {
+          pushCandidate(candidates, storedBase);
+        }
+        if (!isLoopbackApiBase(configuredBase)) {
+          pushCandidate(candidates, configuredBase);
+        }
       }
-      pushCandidate(candidates, "http://localhost:4000");
-      pushCandidate(candidates, "http://127.0.0.1:4000");
     } else {
       // Prefer fresh env config on native so stale localStorage values do not shadow LAN API base.
       pushCandidate(candidates, configuredBase);
@@ -447,6 +475,7 @@ async function fetchWithTimeout(url, options) {
 async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}) {
   const candidates = getApiBaseCandidates();
   let lastNetworkError = null;
+  let lastMissingBackendError = "";
 
   for (const apiBase of candidates) {
     try {
@@ -460,6 +489,10 @@ async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}
       });
 
       if (!response.ok && !apiBase && (response.status === 404 || response.status === 405)) {
+        if (!isLocalBrowserHost()) {
+          lastMissingBackendError =
+            "This deployed frontend could not find an API backend at `/api`. Make sure your Vercel deployment includes the `api/[...route].js` function. If you host backend elsewhere, set `VITE_API_BASE_URL` to that public HTTPS API URL and redeploy.";
+        }
         continue;
       }
 
@@ -486,6 +519,10 @@ async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}
       );
     }
     throw new Error(buildFetchErrorMessage());
+  }
+
+  if (lastMissingBackendError) {
+    throw new Error(lastMissingBackendError);
   }
 
   throw new Error("Request failed.");
