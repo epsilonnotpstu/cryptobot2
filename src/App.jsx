@@ -15,6 +15,7 @@ const AUTH_CONFIG = {
   useRemote: true,
   apiBase: (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "http://localhost:4000" : "")).trim(),
 };
+const ALLOW_EXTERNAL_API_FALLBACK = import.meta.env.VITE_ALLOW_EXTERNAL_API_FALLBACK === "true";
 
 const AUTH_STORAGE_KEYS = {
   user: "cryptobot2_auth_user",
@@ -338,11 +339,13 @@ function getApiBaseCandidates() {
         pushCandidate(candidates, "http://localhost:4000");
         pushCandidate(candidates, "http://127.0.0.1:4000");
       } else {
-        if (!isLoopbackApiBase(storedBase)) {
-          pushCandidate(candidates, storedBase);
-        }
-        if (!isLoopbackApiBase(configuredBase)) {
-          pushCandidate(candidates, configuredBase);
+        if (ALLOW_EXTERNAL_API_FALLBACK) {
+          if (!isLoopbackApiBase(storedBase)) {
+            pushCandidate(candidates, storedBase);
+          }
+          if (!isLoopbackApiBase(configuredBase)) {
+            pushCandidate(candidates, configuredBase);
+          }
         }
       }
     } else {
