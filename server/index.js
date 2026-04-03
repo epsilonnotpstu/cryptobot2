@@ -26,7 +26,12 @@ const googleClient = GOOGLE_CLIENT_IDS.length > 0 ? new OAuth2Client() : null;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
-const dataDir = path.join(rootDir, "server", "data");
+const isVercelRuntime = process.env.VERCEL === "1";
+const dataDir = process.env.AUTH_DATA_DIR
+  ? path.resolve(process.env.AUTH_DATA_DIR)
+  : isVercelRuntime
+    ? path.join("/tmp", "cryptobot2-auth-data")
+    : path.join(rootDir, "server", "data");
 
 fs.mkdirSync(dataDir, { recursive: true });
 
@@ -735,7 +740,18 @@ app.post("/api/auth/password/reset", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => {
-  // eslint-disable-next-line no-console
-  console.log(`[auth-api] running on http://${HOST}:${PORT}`);
-});
+const isExecutedDirectly = (() => {
+  if (!process.argv[1]) {
+    return false;
+  }
+  return path.resolve(process.argv[1]) === __filename;
+})();
+
+if (isExecutedDirectly) {
+  app.listen(PORT, HOST, () => {
+    // eslint-disable-next-line no-console
+    console.log(`[auth-api] running on http://${HOST}:${PORT}`);
+  });
+}
+
+export default app;
