@@ -443,6 +443,10 @@ async function openExternalAuthUrl(url) {
 }
 
 function normalizeAuthErrorMessage(message = "") {
+  if (/the page could not be found|not_found/i.test(message)) {
+    return "Auth API route পাওয়া যায়নি. Vercel deploy-এ `api/auth/...` files include হয়েছে কিনা check করে redeploy করো.";
+  }
+
   if (/smtp|invalid login|535|sender/i.test(message)) {
     return "OTP email service configured হয়নি. SMTP login/key বা verified sender ঠিক করতে হবে, তারপর আবার চেষ্টা করো.";
   }
@@ -475,6 +479,24 @@ async function fetchWithTimeout(url, options) {
   }
 }
 
+async function parseErrorPayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    const json = await response.json().catch(() => ({}));
+    return {
+      message: json?.error || json?.message || "",
+      rawText: "",
+    };
+  }
+
+  const text = await response.text().catch(() => "");
+  return {
+    message: text.trim(),
+    rawText: text,
+  };
+}
+
 async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}) {
   const candidates = getApiBaseCandidates();
   let lastNetworkError = null;
@@ -494,16 +516,21 @@ async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}
       if (!response.ok && !apiBase && (response.status === 404 || response.status === 405)) {
         if (!isLocalBrowserHost()) {
           lastMissingBackendError =
-            "This deployed frontend could not find an API backend at `/api`. Make sure your Vercel deployment includes the `api/[...route].js` function. If you host backend elsewhere, set `VITE_API_BASE_URL` to that public HTTPS API URL and redeploy.";
+            "This deployed frontend could not find an API backend at `/api`. Make sure your Vercel deployment includes the `api/auth/...` function files and `api/health.js`, then redeploy.";
         }
         continue;
       }
 
-      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(normalizeAuthErrorMessage(data.error));
+        const errorPayload = await parseErrorPayload(response);
+        const statusLine = `HTTP ${response.status}`;
+        const fallbackMessage =
+          errorPayload.message || `${statusLine} ${response.statusText || "Request failed"}`;
+        throw new Error(normalizeAuthErrorMessage(fallbackMessage));
       }
 
+      const isJson = (response.headers.get("content-type") || "").includes("application/json");
+      const data = isJson ? await response.json().catch(() => ({})) : {};
       storeApiBase(apiBase);
       return data;
     } catch (error) {
