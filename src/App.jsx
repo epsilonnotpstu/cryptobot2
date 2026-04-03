@@ -1,27 +1,42 @@
 import { useEffect, useRef, useState } from "react";
+import { GoogleLogin } from "@react-oauth/google";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Browser } from "@capacitor/browser";
+
+const ROUTES = {
+  home: "/",
+  login: "/login",
+  signup: "/signup",
+  admin: "/admin",
+  app: "/app",
+};
+
+const AUTH_CONFIG = {
+  useRemote: true,
+  apiBase: (import.meta.env.VITE_API_BASE_URL || "http://localhost:4000").trim(),
+};
+
+const AUTH_STORAGE_KEYS = {
+  user: "cryptobot2_auth_user",
+  session: "cryptobot2_auth_session",
+  apiBase: "cryptobot2_api_base",
+  nativeGoogleState: "cryptobot2_native_google_state",
+  transientError: "cryptobot2_auth_transient_error",
+  transientNotice: "cryptobot2_auth_transient_notice",
+};
+
+const AUTH_REQUEST_TIMEOUT_MS = 5000;
+const PUBLIC_AUTH_BASE_URL = (import.meta.env.VITE_PUBLIC_AUTH_BASE_URL || "").trim().replace(/\/+$/, "");
+const NATIVE_AUTH_CALLBACK_URL = (
+  import.meta.env.VITE_NATIVE_AUTH_CALLBACK_URL || "cryptobotprime://auth-callback"
+)
+  .trim()
+  .replace(/\/+$/, "");
 
 const initialAssets = [
-  {
-    name: "Bitcoin",
-    symbol: "BTC",
-    price: 67234.56,
-    change: 2.34,
-    iconClass: "btc",
-  },
-  {
-    name: "Ethereum",
-    symbol: "ETH",
-    price: 3456.78,
-    change: 1.87,
-    iconClass: "eth",
-  },
-  {
-    name: "Cardano",
-    symbol: "ADA",
-    price: 0.4567,
-    change: -0.23,
-    iconClass: "ada",
-  },
+  { name: "Bitcoin", symbol: "BTC", price: 67234.56, change: 2.34, iconClass: "btc" },
+  { name: "Ethereum", symbol: "ETH", price: 3456.78, change: 1.87, iconClass: "eth" },
+  { name: "Cardano", symbol: "ADA", price: 0.4567, change: -0.23, iconClass: "ada" },
 ];
 
 const features = [
@@ -52,8 +67,7 @@ const features = [
   {
     icon: "fa-mobile-alt",
     title: "Mobile Trading",
-    description:
-      "Trade on the go with our award-winning mobile apps for iOS and Android devices.",
+    description: "Secure mobile trading with verified access and instant account recovery.",
   },
   {
     icon: "fa-headset",
@@ -67,20 +81,17 @@ const steps = [
   {
     icon: "fa-user-plus",
     title: "Create Your Account",
-    description:
-      "Sign up in minutes with just your email. Verify your identity for enhanced security and higher limits.",
+    description: "Sign up with your name, email, OTP verification, and secure password.",
   },
   {
     icon: "fa-credit-card",
     title: "Fund Your Wallet",
-    description:
-      "Deposit funds using bank transfer, credit card, or existing cryptocurrencies. All transactions are secure and instant.",
+    description: "Deposit funds securely and track your verified account from any device.",
   },
   {
     icon: "fa-exchange-alt",
     title: "Start Trading",
-    description:
-      "Buy, sell, and trade cryptocurrencies with advanced tools, real-time charts, and professional features.",
+    description: "Trade with pro tools, live pricing, and a protected crypto dashboard.",
   },
 ];
 
@@ -88,52 +99,35 @@ const faqs = [
   {
     question: "Is CryptoByte Pro safe and secure?",
     answer:
-      "Yes, we employ bank-level security measures including cold storage for 95% of funds, multi-signature wallets, two-factor authentication, and are fully insured against security breaches.",
+      "Yes, we use bank-level security, email verification, encrypted password storage, and protected account recovery.",
   },
   {
     question: "What cryptocurrencies can I trade?",
     answer:
-      "You can trade over 300 cryptocurrencies including Bitcoin (BTC), Ethereum (ETH), Cardano (ADA), Solana (SOL), and many others with competitive fees.",
+      "You can trade over 300 cryptocurrencies including Bitcoin, Ethereum, Cardano, Solana, and more.",
   },
   {
     question: "How do I get started?",
     answer:
-      "Getting started is easy! Simply sign up for an account, verify your identity, fund your wallet, and you're ready to start trading. The entire process takes less than 10 minutes.",
+      "Create your account, verify your email OTP, set your password, and your 6-digit user ID will be assigned instantly.",
   },
   {
-    question: "What are your trading fees?",
+    question: "Can I reset my password?",
     answer:
-      "Our trading fees start at 0.1% for makers and 0.2% for takers, with significant discounts available for high-volume traders and premium members.",
-  },
-  {
-    question: "Do you offer customer support?",
-    answer:
-      "Yes, we provide 24/7 customer support through live chat, email, and phone. Our dedicated support team is always ready to help you with any questions or issues.",
+      "Yes. Use forgot password, enter your email or user ID, verify OTP from your signup email, and create a new password.",
   },
   {
     question: "Can I use the platform on mobile?",
     answer:
-      "Absolutely! We have award-winning mobile apps for both iOS and Android that offer the full trading experience with advanced charts, real-time notifications, and secure transactions.",
+      "Yes. The mobile app and the web login now share the same backend account system and recovery flow.",
   },
 ];
 
 const footerSections = [
-  {
-    title: "Products",
-    links: ["Spot Trading", "Futures Trading", "Margin Trading", "Staking"],
-  },
-  {
-    title: "Company",
-    links: ["About Us", "Careers", "Press", "Legal"],
-  },
-  {
-    title: "Resources",
-    links: ["Help Center", "API Documentation", "Trading Guide", "Blog"],
-  },
-  {
-    title: "Support",
-    links: ["Contact Us", "Submit a Request", "System Status", "Bug Bounty"],
-  },
+  { title: "Products", links: ["Spot Trading", "Futures Trading", "Margin Trading", "Staking"] },
+  { title: "Company", links: ["About Us", "Careers", "Press", "Legal"] },
+  { title: "Resources", links: ["Help Center", "API Documentation", "Trading Guide", "Blog"] },
+  { title: "Support", links: ["Contact Us", "Submit a Request", "System Status", "Bug Bounty"] },
 ];
 
 function formatPrice(price, symbol) {
@@ -147,145 +141,1380 @@ function formatPrice(price, symbol) {
   })}`;
 }
 
-function App() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [assets, setAssets] = useState(initialAssets);
-  const [activeFaq, setActiveFaq] = useState(0);
-  const [stats, setStats] = useState({
-    volume: 0,
-    users: 0,
-    uptime: 0,
-  });
-  const canvasRef = useRef(null);
+function isNativeAppRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const hasCapacitorBridge = Boolean(window.Capacitor);
+  const isNativePlatform = window.Capacitor?.isNativePlatform?.() ?? false;
+  return hasCapacitorBridge && isNativePlatform;
+}
 
-  useEffect(() => {
-    const sections = document.querySelectorAll("section, .feature-card");
-    sections.forEach((section, index) => {
-      section.classList.add("fade-in");
-      section.style.transitionDelay = `${index * 0.06}s`;
-    });
+function parseHashRouteState() {
+  if (typeof window === "undefined") {
+    return { route: ROUTES.app, query: new URLSearchParams() };
+  }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("visible");
-          }
-        });
-      },
-      { threshold: 0.1, rootMargin: "0px 0px -50px 0px" },
+  const defaultRoute = isNativeAppRuntime() ? ROUTES.app : ROUTES.home;
+  const hashContent = window.location.hash.replace(/^#/, "") || defaultRoute;
+  const [rawRoute, rawQuery = ""] = hashContent.split("?");
+  const route = Object.values(ROUTES).includes(rawRoute) ? rawRoute : defaultRoute;
+  return { route, query: new URLSearchParams(rawQuery) };
+}
+
+function getRouteFromHash() {
+  return parseHashRouteState().route;
+}
+
+function goToRoute(route) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.location.hash = route;
+}
+
+function readAuthSnapshot() {
+  if (typeof window === "undefined") {
+    return {
+      hasAccount: false,
+      isLoggedIn: false,
+      name: "",
+      email: "",
+      userId: "",
+      sessionToken: "",
+    };
+  }
+
+  let parsedUser = null;
+  try {
+    const rawUser = window.localStorage.getItem(AUTH_STORAGE_KEYS.user);
+    parsedUser = rawUser ? JSON.parse(rawUser) : null;
+  } catch {
+    parsedUser = null;
+  }
+
+  const sessionToken = window.localStorage.getItem(AUTH_STORAGE_KEYS.session);
+  return {
+    hasAccount: Boolean(parsedUser?.email || parsedUser?.userId),
+    isLoggedIn: Boolean(sessionToken),
+    name: parsedUser?.name ?? "",
+    email: parsedUser?.email ?? "",
+    userId: parsedUser?.userId ?? "",
+    sessionToken: sessionToken ?? "",
+  };
+}
+
+function storeAuthUser(user) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
+}
+
+function storeSessionToken(sessionToken) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(AUTH_STORAGE_KEYS.session, sessionToken);
+}
+
+function storeApiBase(apiBase) {
+  if (typeof window === "undefined" || !apiBase) {
+    return;
+  }
+  window.localStorage.setItem(AUTH_STORAGE_KEYS.apiBase, apiBase);
+}
+
+function clearSessionToken() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(AUTH_STORAGE_KEYS.session);
+}
+
+function storeAuthenticatedUser({ user, sessionToken }) {
+  storeAuthUser(user);
+  storeSessionToken(sessionToken);
+}
+
+function buildFetchErrorMessage() {
+  if (isNativeAppRuntime()) {
+    return "API reach করা যাচ্ছে না. Mobile app-এর জন্য backend server চালু রাখো, .env-এ VITE_API_BASE_URL-এ PC/LAN IP দাও, AndroidManifest.xml-এ usesCleartextTraffic=true রাখো, তারপর npm run cap:sync করে app rebuild করো.";
+  }
+  return "Backend server reach করা যাচ্ছে না. npm run server:start বা npm run dev:all চালু আছে কিনা check করো.";
+}
+
+function readStoredApiBase() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(AUTH_STORAGE_KEYS.apiBase) || "";
+}
+
+function persistTransientAuthFeedback({ error = "", notice = "" }) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (error) {
+    window.localStorage.setItem(AUTH_STORAGE_KEYS.transientError, error);
+  }
+  if (notice) {
+    window.localStorage.setItem(AUTH_STORAGE_KEYS.transientNotice, notice);
+  }
+}
+
+function consumeTransientAuthFeedback() {
+  if (typeof window === "undefined") {
+    return { error: "", notice: "" };
+  }
+
+  const error = window.localStorage.getItem(AUTH_STORAGE_KEYS.transientError) || "";
+  const notice = window.localStorage.getItem(AUTH_STORAGE_KEYS.transientNotice) || "";
+  window.localStorage.removeItem(AUTH_STORAGE_KEYS.transientError);
+  window.localStorage.removeItem(AUTH_STORAGE_KEYS.transientNotice);
+  return { error, notice };
+}
+
+function createNativeGoogleState(view) {
+  const payload = `${view}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(AUTH_STORAGE_KEYS.nativeGoogleState, payload);
+  }
+  return payload;
+}
+
+function consumeNativeGoogleState() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const value = window.localStorage.getItem(AUTH_STORAGE_KEYS.nativeGoogleState) || "";
+  window.localStorage.removeItem(AUTH_STORAGE_KEYS.nativeGoogleState);
+  return value;
+}
+
+function pushCandidate(list, value) {
+  const normalized = (value || "").trim().replace(/\/+$/, "");
+  if (!normalized || list.includes(normalized)) {
+    return;
+  }
+  list.push(normalized);
+}
+
+function getApiBaseCandidates() {
+  const configuredBase = (AUTH_CONFIG.apiBase || "").trim().replace(/\/+$/, "");
+  const storedBase = readStoredApiBase();
+  const candidates = [];
+
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+
+    if (!isNativeAppRuntime()) {
+      pushCandidate(candidates, "");
+      pushCandidate(candidates, storedBase);
+      pushCandidate(candidates, configuredBase);
+      if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
+        pushCandidate(candidates, `http://${hostname}:4000`);
+      }
+      pushCandidate(candidates, "http://localhost:4000");
+      pushCandidate(candidates, "http://127.0.0.1:4000");
+    } else {
+      // Prefer fresh env config on native so stale localStorage values do not shadow LAN API base.
+      pushCandidate(candidates, configuredBase);
+      pushCandidate(candidates, storedBase);
+      pushCandidate(candidates, "http://10.0.2.2:4000");
+      pushCandidate(candidates, "http://localhost:4000");
+    }
+  } else {
+    pushCandidate(candidates, storedBase);
+    pushCandidate(candidates, configuredBase || "http://localhost:4000");
+  }
+
+  return candidates;
+}
+
+function buildAuthUrl(apiBase, endpoint) {
+  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  return apiBase ? `${apiBase}${normalizedEndpoint}` : normalizedEndpoint;
+}
+
+function getPublicAuthRoute(view) {
+  const route = view === "signup" ? ROUTES.signup : ROUTES.login;
+  return `${route}?provider=google`;
+}
+
+function getPublicGoogleAuthUrl(view, { callbackUrl, state } = {}) {
+  if (!PUBLIC_AUTH_BASE_URL) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  params.set("provider", "google");
+  if (callbackUrl) {
+    params.set("native", "1");
+    params.set("native_callback", callbackUrl);
+  }
+  if (state) {
+    params.set("state", state);
+  }
+
+  const route = view === "signup" ? ROUTES.signup : ROUTES.login;
+  return `${PUBLIC_AUTH_BASE_URL}/#${route}?${params.toString()}`;
+}
+
+function hasValidHttpsPublicAuthBase() {
+  return /^https:\/\//i.test(PUBLIC_AUTH_BASE_URL);
+}
+
+function hasValidNativeCallbackUrl() {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(NATIVE_AUTH_CALLBACK_URL) && !/^https?:\/\//i.test(NATIVE_AUTH_CALLBACK_URL);
+}
+
+function isExpectedNativeCallbackUrl(url) {
+  if (!url || !hasValidNativeCallbackUrl()) {
+    return false;
+  }
+
+  try {
+    const expected = new URL(NATIVE_AUTH_CALLBACK_URL);
+    const received = new URL(url);
+    const expectedPath = (expected.pathname || "").replace(/\/+$/, "");
+    const receivedPath = (received.pathname || "").replace(/\/+$/, "");
+    return (
+      expected.protocol === received.protocol &&
+      expected.host === received.host &&
+      expectedPath === receivedPath
     );
+  } catch {
+    return false;
+  }
+}
 
-    sections.forEach((section) => observer.observe(section));
+async function openExternalAuthUrl(url) {
+  if (!url) {
+    return false;
+  }
 
-    return () => observer.disconnect();
-  }, []);
+  try {
+    if (isNativeAppRuntime()) {
+      await Browser.open({ url, presentationStyle: "fullscreen" });
+      return true;
+    }
+  } catch {
+    // Fall back to the browser API below if the native browser plugin is unavailable.
+  }
 
-  useEffect(() => {
-    const targets = { volume: 2.4, users: 500, uptime: 99.9 };
-    const startedAt = performance.now();
-    let frameId = 0;
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return true;
+  }
 
-    const animate = (time) => {
-      const progress = Math.min((time - startedAt) / 1800, 1);
-      setStats({
-        volume: Number((targets.volume * progress).toFixed(1)),
-        users: Math.round(targets.users * progress),
-        uptime: Number((targets.uptime * progress).toFixed(1)),
+  return false;
+}
+
+function normalizeAuthErrorMessage(message = "") {
+  if (/smtp|invalid login|535|sender/i.test(message)) {
+    return "OTP email service configured হয়নি. SMTP login/key বা verified sender ঠিক করতে হবে, তারপর আবার চেষ্টা করো.";
+  }
+  return message || "Request failed.";
+}
+
+function buildOtpNotice(data, defaultMessage) {
+  if (data?.delivery === "dev-fallback" && data?.devOtp) {
+    const emailIssue = data.emailError ? ` Email issue: ${data.emailError}` : "";
+    return `Email delivery failed, so dev OTP auto-filled করা হয়েছে: ${data.devOtp}.${emailIssue}`;
+  }
+  return data?.message || defaultMessage;
+}
+
+function isRetryableFetchError(error) {
+  return error instanceof TypeError || error?.name === "AbortError";
+}
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}) {
+  const candidates = getApiBaseCandidates();
+  let lastNetworkError = null;
+
+  for (const apiBase of candidates) {
+    try {
+      const response = await fetchWithTimeout(buildAuthUrl(apiBase, endpoint), {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
 
-      if (progress < 1) {
-        frameId = requestAnimationFrame(animate);
+      if (!response.ok && !apiBase && (response.status === 404 || response.status === 405)) {
+        continue;
       }
-    };
 
-    frameId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frameId);
-  }, []);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(normalizeAuthErrorMessage(data.error));
+      }
 
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setAssets((current) =>
-        current.map((asset) => {
-          const changePercent = (Math.random() - 0.5) * 4;
-          return {
-            ...asset,
-            price: asset.price * (1 + changePercent / 100),
-            change: Number(changePercent.toFixed(2)),
-          };
-        }),
+      storeApiBase(apiBase);
+      return data;
+    } catch (error) {
+      if (isRetryableFetchError(error)) {
+        lastNetworkError = error;
+        continue;
+      }
+      throw new Error(normalizeAuthErrorMessage(error.message));
+    }
+  }
+
+  if (lastNetworkError) {
+    if (lastNetworkError?.name === "AbortError") {
+      throw new Error(
+        "OTP request timeout হয়েছে. Backend server URL check করো. Browser এ হলে `npm run dev:all` চালিয়ে `/api` proxy use করাই best.",
       );
-    }, 3000);
+    }
+    throw new Error(buildFetchErrorMessage());
+  }
 
-    return () => window.clearInterval(intervalId);
-  }, []);
+  throw new Error("Request failed.");
+}
+
+const remoteAuthService = {
+  async sendSignupOtp({ name, email }) {
+    return requestAuth("/api/auth/signup/send-otp", {
+      method: "POST",
+      body: { name, email },
+    });
+  },
+  async signup({ name, email, otp, password }) {
+    const data = await requestAuth("/api/auth/signup/complete", {
+      method: "POST",
+      body: { name, email, otp, password },
+    });
+    storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
+    return data;
+  },
+  async login({ identifier, password }) {
+    const data = await requestAuth("/api/auth/login", {
+      method: "POST",
+      body: { identifier, password },
+    });
+    storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
+    return data;
+  },
+  async googleAuth({ token }) {
+    const data = await requestAuth("/api/auth/google", {
+      method: "POST",
+      body: { token },
+    });
+    storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
+    return data;
+  },
+  async getSession(sessionToken) {
+    const data = await requestAuth("/api/auth/session", { sessionToken });
+    storeAuthUser(data.user);
+    return data;
+  },
+  async logout({ sessionToken }) {
+    if (sessionToken) {
+      try {
+        await requestAuth("/api/auth/logout", {
+          method: "POST",
+          sessionToken,
+        });
+      } catch {
+        // Ignore remote logout failures while clearing the local session.
+      }
+    }
+    clearSessionToken();
+  },
+  async requestPasswordReset({ identifier }) {
+    return requestAuth("/api/auth/password/lookup", {
+      method: "POST",
+      body: { identifier },
+    });
+  },
+  async verifyPasswordResetOtp({ identifier, otp }) {
+    return requestAuth("/api/auth/password/verify-otp", {
+      method: "POST",
+      body: { identifier, otp },
+    });
+  },
+  async resetPassword({ resetToken, password, confirmPassword }) {
+    return requestAuth("/api/auth/password/reset", {
+      method: "POST",
+      body: { resetToken, password, confirmPassword },
+    });
+  },
+};
+
+function getAuthService() {
+  return remoteAuthService;
+}
+
+function useAuthFlow({ initialView, authSnapshot, onAuthenticated }) {
+  const [view, setView] = useState(initialView);
+  const [name, setName] = useState(authSnapshot.name || "");
+  const [email, setEmail] = useState(authSnapshot.email || "");
+  const [identifier, setIdentifier] = useState(authSnapshot.userId || authSnapshot.email || "");
+  const [lookupIdentifier, setLookupIdentifier] = useState("");
+  const [otp, setOtp] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [matchedAccount, setMatchedAccount] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return undefined;
+    setView(initialView);
+  }, [initialView]);
+
+  useEffect(() => {
+    setName(authSnapshot.name || "");
+    setEmail(authSnapshot.email || "");
+    setIdentifier(authSnapshot.userId || authSnapshot.email || "");
+  }, [authSnapshot.email, authSnapshot.name, authSnapshot.userId]);
+
+  useEffect(() => {
+    const feedback = consumeTransientAuthFeedback();
+    if (feedback.error) {
+      setError(feedback.error);
+    }
+    if (feedback.notice) {
+      setNotice(feedback.notice);
+    }
+  }, []);
+
+  const authService = getAuthService();
+
+  const clearFeedback = () => {
+    setError("");
+    setNotice("");
+  };
+
+  const switchView = (nextView) => {
+    clearFeedback();
+    setView(nextView);
+    if (nextView === "login") {
+      setOtp("");
+      setPassword("");
+      setConfirmPassword("");
+      setResetToken("");
+      setMatchedAccount(null);
+    }
+  };
+
+  const finishAuth = async () => {
+    setPassword("");
+    setConfirmPassword("");
+    setOtp("");
+    await onAuthenticated();
+  };
+
+  const handleGetSignupOtp = async () => {
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      const data = await authService.sendSignupOtp({ name, email });
+      if (data?.devOtp) {
+        setOtp(data.devOtp);
+      }
+      setNotice(buildOtpNotice(data, "OTP sent to your email. Enter it below to complete signup."));
+    } catch (requestError) {
+      setError(requestError.message || "Could not send OTP.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      await authService.login({ identifier, password });
+      await finishAuth();
+    } catch (submitError) {
+      setError(submitError.message || "Login failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSignup = async (event) => {
+    event.preventDefault();
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      await authService.signup({ name, email, otp, password });
+      switchView("login");
+      setNotice("Account created successfully! Please login with your new credentials.");
+    } catch (submitError) {
+      setError(submitError.message || "Signup failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleForgotLookup = async (event) => {
+    if (event?.preventDefault) {
+      event.preventDefault();
+    }
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      const data = await authService.requestPasswordReset({ identifier: lookupIdentifier });
+      setMatchedAccount(data);
+      if (data?.devOtp) {
+        setOtp(data.devOtp);
+      }
+      setNotice(buildOtpNotice(data, "Account found. OTP sent to the signup email."));
+      setView("forgotOtp");
+    } catch (lookupError) {
+      setError(lookupError.message || "Could not find the account.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleForgotOtp = async (event) => {
+    event.preventDefault();
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      const data = await authService.verifyPasswordResetOtp({
+        identifier: lookupIdentifier,
+        otp,
+      });
+      setResetToken(data.resetToken);
+      setMatchedAccount(data.user);
+      setNotice("OTP verified. Create your new password.");
+      setView("forgotReset");
+    } catch (verifyError) {
+      setError(verifyError.message || "OTP verification failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      await authService.resetPassword({
+        resetToken,
+        password,
+        confirmPassword,
+      });
+      setIdentifier(matchedAccount?.userId || matchedAccount?.email || lookupIdentifier);
+      setPassword("");
+      setConfirmPassword("");
+      setOtp("");
+      setResetToken("");
+      setMatchedAccount(null);
+      setView("login");
+      setNotice("Password updated. Please login with the new password.");
+    } catch (resetError) {
+      setError(resetError.message || "Could not reset password.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const heading =
+    view === "signup"
+      ? "Create your trading account"
+      : view === "forgotLookup"
+        ? "Find your account"
+        : view === "forgotOtp"
+          ? "Verify reset OTP"
+          : view === "forgotReset"
+            ? "Create a new password"
+            : "Welcome back";
+
+  const subtitle =
+    view === "signup"
+      ? "Enter your name, get an email OTP, and create your password."
+      : view === "forgotLookup"
+        ? "Enter your signup email or 6-digit user ID to continue."
+        : view === "forgotOtp"
+          ? "Use the OTP that was sent to your signup email."
+          : view === "forgotReset"
+            ? "Choose a strong new password, then login again."
+            : "Login with your email or 6-digit user ID.";
+
+  const handleGoogleAuth = async (token) => {
+    clearFeedback();
+    setSubmitting(true);
+    try {
+      await authService.googleAuth({ token });
+      await finishAuth();
+    } catch (submitError) {
+      setError(submitError.message || "Google authentication failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleMobileGoogleAuth = async (targetView) => {
+    clearFeedback();
+
+    if (!PUBLIC_AUTH_BASE_URL) {
+      setError(
+        "Mobile Google sign-in-এর জন্য .env-এ VITE_PUBLIC_AUTH_BASE_URL এ public HTTPS tunnel/domain দাও, তারপর app rebuild করো.",
+      );
+      return;
     }
 
-    const context = canvas.getContext("2d");
-    const points = Array.from({ length: 50 }, (_, index) => ({
-      x: (index / 49) * 100,
-      y: 50 + Math.sin(index * 0.3) * 20 + Math.random() * 10 - 5,
-    }));
+    if (!hasValidHttpsPublicAuthBase()) {
+      setError("VITE_PUBLIC_AUTH_BASE_URL অবশ্যই https:// URL হতে হবে (Google secure browser flow). ");
+      return;
+    }
 
-    const resizeAndDraw = () => {
-      const width = canvas.offsetWidth;
-      const height = canvas.offsetHeight;
-      canvas.width = width;
-      canvas.height = height;
+    if (!hasValidNativeCallbackUrl()) {
+      setError("VITE_NATIVE_AUTH_CALLBACK_URL invalid. Example: cryptobotprime://auth-callback");
+      return;
+    }
 
-      context.clearRect(0, 0, width, height);
+    const state = createNativeGoogleState(targetView);
+    const publicUrl = getPublicGoogleAuthUrl(targetView, {
+      callbackUrl: NATIVE_AUTH_CALLBACK_URL,
+      state,
+    });
 
-      const gradient = context.createLinearGradient(0, 0, 0, height);
-      gradient.addColorStop(0, "rgba(103, 126, 234, 0.8)");
-      gradient.addColorStop(1, "rgba(103, 126, 234, 0.1)");
+    const opened = await openExternalAuthUrl(publicUrl);
+    if (!opened) {
+      setError("Secure browser open করা যায়নি. Public auth URL manually browser-এ খুলো.");
+      return;
+    }
 
-      context.beginPath();
-      context.moveTo(0, height);
-      points.forEach((point) => {
-        context.lineTo((point.x / 100) * width, (point.y / 100) * height);
-      });
-      context.lineTo(width, height);
-      context.closePath();
-      context.fillStyle = gradient;
-      context.fill();
+    setNotice(
+      "Google sign-in secure browser-এ open হয়েছে. সেখানে sign-in complete করো. Native WebView-এ Google login supported না.",
+    );
+  };
 
-      context.beginPath();
-      points.forEach((point, index) => {
-        const x = (point.x / 100) * width;
-        const y = (point.y / 100) * height;
-        if (index === 0) {
-          context.moveTo(x, y);
-        } else {
-          context.lineTo(x, y);
+  return {
+    view,
+    setView: switchView,
+    name,
+    setName,
+    email,
+    setEmail,
+    identifier,
+    setIdentifier,
+    lookupIdentifier,
+    setLookupIdentifier,
+    otp,
+    setOtp,
+    password,
+    setPassword,
+    confirmPassword,
+    setConfirmPassword,
+    matchedAccount,
+    notice,
+    error,
+    submitting,
+    showPassword,
+    setShowPassword,
+    showConfirmPassword,
+    setShowConfirmPassword,
+    heading,
+    subtitle,
+    handleGetSignupOtp,
+    handleLogin,
+    handleSignup,
+    handleForgotLookup,
+    handleForgotOtp,
+    handleResetPassword,
+    handleGoogleAuth,
+    handleMobileGoogleAuth,
+    setNotice,
+    setError,
+  };
+}
+
+const webAuthClasses = {
+  form: "auth-form",
+  otpRow: "otp-row",
+  passwordRow: "password-field-row",
+  toggle: "password-toggle-btn",
+  submit: "btn btn-primary auth-submit",
+  linkRow: "auth-link-row",
+  inline: "auth-inline-btn",
+  chip: "auth-account-chip",
+};
+
+const mobileAuthClasses = {
+  form: "mobile-auth-form",
+  otpRow: "mobile-otp-row",
+  passwordRow: "mobile-password-row",
+  toggle: "mobile-show-btn",
+  submit: "btn btn-primary mobile-auth-submit",
+  linkRow: "mobile-auth-link-row",
+  inline: "mobile-inline-btn",
+  chip: "mobile-auth-account-chip",
+};
+
+function AuthForms({ flow, classes }) {
+  const isSignup = flow.view === "signup";
+  const isForgotLookup = flow.view === "forgotLookup";
+  const isForgotOtp = flow.view === "forgotOtp";
+  const isForgotReset = flow.view === "forgotReset";
+  const isNativeRuntime = isNativeAppRuntime();
+  const hashState = parseHashRouteState();
+  const query = hashState.query;
+  const hasNativeGoogleUrl = hasValidHttpsPublicAuthBase();
+  const nativeBridgeCallback = query.get("native_callback") || "";
+  const nativeBridgeState = query.get("state") || "";
+  const isNativeBridgeRequest =
+    !isNativeRuntime && query.get("provider") === "google" && query.get("native") === "1" && Boolean(nativeBridgeCallback);
+  const googleButtonText = isSignup ? "Sign up with Google" : "Continue with Google";
+  const googleErrorText = isSignup ? "Google signup failed." : "Google login failed.";
+
+  const returnNativeGoogleResult = (payload) => {
+    if (!isNativeBridgeRequest) {
+      return false;
+    }
+    try {
+      const callbackUrl = new URL(nativeBridgeCallback);
+      if (/^https?:$/i.test(callbackUrl.protocol)) {
+        return false;
+      }
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value) {
+          callbackUrl.searchParams.set(key, value);
         }
       });
-      context.strokeStyle = "#667eea";
-      context.lineWidth = 2;
-      context.stroke();
-    };
+      if (nativeBridgeState) {
+        callbackUrl.searchParams.set("state", nativeBridgeState);
+      }
+      window.location.href = callbackUrl.toString();
+      return true;
+    } catch {
+      flow.setError("Native callback URL invalid. App config check করে আবার চেষ্টা করো.");
+      return false;
+    }
+  };
 
-    resizeAndDraw();
-    const chartInterval = window.setInterval(() => {
-      points.forEach((point) => {
-        point.y += (Math.random() - 0.5) * 3;
-        point.y = Math.max(15, Math.min(85, point.y));
-      });
-      resizeAndDraw();
-    }, 2000);
+  const renderGoogleAction = () => (
+    <div className="auth-social">
+      <div className="auth-divider">
+        <span>or</span>
+      </div>
+      <div className="auth-social-card">
+        <p className="auth-social-label">{googleButtonText}</p>
+        <p className="auth-social-copy">
+          {isNativeRuntime
+            ? hasNativeGoogleUrl
+              ? "Native app-এ Google sign-in secure browser-এ open হবে."
+              : "Native app-এ Google sign-in secure browser-এ চলবে. Public HTTPS tunnel/domain লাগবে."
+            : "Use your verified Google account for instant access."}
+        </p>
+        {isNativeRuntime ? (
+          <button
+            type="button"
+            className="btn btn-ghost auth-mobile-google-btn"
+            onClick={() => flow.handleMobileGoogleAuth(flow.view)}
+          >
+            Open Secure Google Sign-In
+          </button>
+        ) : (
+          <div className="auth-google-button">
+            <GoogleLogin
+              theme="outline"
+              size="large"
+              shape="pill"
+              text={isSignup ? "signup_with" : "continue_with"}
+              width="320"
+              logo_alignment="left"
+              onSuccess={(credentialResponse) => {
+                const token = credentialResponse?.credential;
+                if (!token) {
+                  flow.setError(`${googleErrorText} Missing token from Google response.`);
+                  return;
+                }
+                if (returnNativeGoogleResult({ provider: "google", token })) {
+                  return;
+                }
+                flow.handleGoogleAuth(token);
+              }}
+              onError={() => {
+                if (returnNativeGoogleResult({ provider: "google", error: "Google authentication failed." })) {
+                  return;
+                }
+                flow.setError(`${googleErrorText} Check Google client origin setup and try again.`);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
-    window.addEventListener("resize", resizeAndDraw);
+  return (
+    <>
+      {flow.matchedAccount ? (
+        <div className={classes.chip}>
+          <span>{flow.matchedAccount.name || "Account found"}</span>
+          <strong>ID {flow.matchedAccount.userId}</strong>
+        </div>
+      ) : null}
 
-    return () => {
-      window.clearInterval(chartInterval);
-      window.removeEventListener("resize", resizeAndDraw);
-    };
-  }, []);
+      {flow.view === "login" ? (
+        <form className={classes.form} onSubmit={flow.handleLogin}>
+          <label htmlFor="auth-login-identifier">Email or User ID</label>
+          <input
+            id="auth-login-identifier"
+            type="text"
+            value={flow.identifier}
+            onChange={(event) => flow.setIdentifier(event.target.value)}
+            placeholder="email@example.com or 123456"
+            required
+          />
 
+          <label htmlFor="auth-login-password">Password</label>
+          <div className={classes.passwordRow}>
+            <input
+              id="auth-login-password"
+              type={flow.showPassword ? "text" : "password"}
+              value={flow.password}
+              onChange={(event) => flow.setPassword(event.target.value)}
+              placeholder="Enter password"
+              autoComplete="current-password"
+              required
+            />
+            <button
+              type="button"
+              className={classes.toggle}
+              onClick={() => flow.setShowPassword((current) => !current)}
+            >
+              {flow.showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          <div className={classes.linkRow}>
+            <button type="button" className={classes.inline} onClick={() => flow.setView("forgotLookup")}>
+              Forgot password?
+            </button>
+          </div>
+
+          {flow.notice ? <p className="mobile-auth-notice">{flow.notice}</p> : null}
+          {flow.error ? <p className="mobile-auth-error">{flow.error}</p> : null}
+
+          <button type="submit" className={classes.submit} disabled={flow.submitting}>
+            {flow.submitting ? "Please wait..." : "Login"}
+          </button>
+
+          {renderGoogleAction()}
+        </form>
+      ) : null}
+
+      {isSignup ? (
+        <form className={classes.form} onSubmit={flow.handleSignup}>
+          <label htmlFor="auth-signup-name">Full Name</label>
+          <input
+            id="auth-signup-name"
+            type="text"
+            value={flow.name}
+            onChange={(event) => flow.setName(event.target.value)}
+            placeholder="Your name"
+            required
+          />
+
+          <label htmlFor="auth-signup-email">Email</label>
+          <input
+            id="auth-signup-email"
+            type="email"
+            value={flow.email}
+            onChange={(event) => flow.setEmail(event.target.value)}
+            placeholder="you@example.com"
+            required
+          />
+
+          <label htmlFor="auth-signup-otp">Verification Code</label>
+          <div className={classes.otpRow}>
+            <input
+              id="auth-signup-otp"
+              type="text"
+              value={flow.otp}
+              onChange={(event) => flow.setOtp(event.target.value)}
+              placeholder="Enter OTP"
+              inputMode="numeric"
+              required
+            />
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={flow.handleGetSignupOtp}
+              disabled={flow.submitting}
+            >
+              {flow.submitting ? "Sending..." : "Get OTP"}
+            </button>
+          </div>
+
+          <label htmlFor="auth-signup-password">Password</label>
+          <div className={classes.passwordRow}>
+            <input
+              id="auth-signup-password"
+              type={flow.showPassword ? "text" : "password"}
+              value={flow.password}
+              onChange={(event) => flow.setPassword(event.target.value)}
+              placeholder="Create password"
+              autoComplete="new-password"
+              required
+            />
+            <button
+              type="button"
+              className={classes.toggle}
+              onClick={() => flow.setShowPassword((current) => !current)}
+            >
+              {flow.showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          {flow.notice ? <p className="mobile-auth-notice">{flow.notice}</p> : null}
+          {flow.error ? <p className="mobile-auth-error">{flow.error}</p> : null}
+
+          <button type="submit" className={classes.submit} disabled={flow.submitting}>
+            {flow.submitting ? "Please wait..." : "Create Account"}
+          </button>
+
+          {renderGoogleAction()}
+        </form>
+      ) : null}
+
+      {isForgotLookup ? (
+        <form className={classes.form} onSubmit={flow.handleForgotLookup}>
+          <label htmlFor="auth-forgot-identifier">Email or User ID</label>
+          <input
+            id="auth-forgot-identifier"
+            type="text"
+            value={flow.lookupIdentifier}
+            onChange={(event) => flow.setLookupIdentifier(event.target.value)}
+            placeholder="email@example.com or 123456"
+            required
+          />
+
+          {flow.notice ? <p className="mobile-auth-notice">{flow.notice}</p> : null}
+          {flow.error ? <p className="mobile-auth-error">{flow.error}</p> : null}
+
+          <button type="submit" className={classes.submit} disabled={flow.submitting}>
+            {flow.submitting ? "Searching..." : "Find Account"}
+          </button>
+
+          <div className={classes.linkRow}>
+            <button type="button" className={classes.inline} onClick={() => flow.setView("login")}>
+              Back to login
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {isForgotOtp ? (
+        <form className={classes.form} onSubmit={flow.handleForgotOtp}>
+          <label htmlFor="auth-reset-otp">Reset OTP</label>
+          <input
+            id="auth-reset-otp"
+            type="text"
+            value={flow.otp}
+            onChange={(event) => flow.setOtp(event.target.value)}
+            placeholder="Enter email OTP"
+            inputMode="numeric"
+            required
+          />
+
+          {flow.notice ? <p className="mobile-auth-notice">{flow.notice}</p> : null}
+          {flow.error ? <p className="mobile-auth-error">{flow.error}</p> : null}
+
+          <button type="submit" className={classes.submit} disabled={flow.submitting}>
+            {flow.submitting ? "Verifying..." : "Verify OTP"}
+          </button>
+
+          <div className={classes.linkRow}>
+            <button type="button" className={classes.inline} onClick={flow.handleForgotLookup} disabled={flow.submitting}>
+              Resend OTP
+            </button>
+            <button type="button" className={classes.inline} onClick={() => flow.setView("forgotLookup")}>
+              Change account
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {isForgotReset ? (
+        <form className={classes.form} onSubmit={flow.handleResetPassword}>
+          <label htmlFor="auth-reset-password">New Password</label>
+          <div className={classes.passwordRow}>
+            <input
+              id="auth-reset-password"
+              type={flow.showPassword ? "text" : "password"}
+              value={flow.password}
+              onChange={(event) => flow.setPassword(event.target.value)}
+              placeholder="Create new password"
+              autoComplete="new-password"
+              required
+            />
+            <button
+              type="button"
+              className={classes.toggle}
+              onClick={() => flow.setShowPassword((current) => !current)}
+            >
+              {flow.showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          <label htmlFor="auth-reset-confirm">Retype Password</label>
+          <div className={classes.passwordRow}>
+            <input
+              id="auth-reset-confirm"
+              type={flow.showConfirmPassword ? "text" : "password"}
+              value={flow.confirmPassword}
+              onChange={(event) => flow.setConfirmPassword(event.target.value)}
+              placeholder="Retype password"
+              autoComplete="new-password"
+              required
+            />
+            <button
+              type="button"
+              className={classes.toggle}
+              onClick={() => flow.setShowConfirmPassword((current) => !current)}
+            >
+              {flow.showConfirmPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          {flow.notice ? <p className="mobile-auth-notice">{flow.notice}</p> : null}
+          {flow.error ? <p className="mobile-auth-error">{flow.error}</p> : null}
+
+          <button type="submit" className={classes.submit} disabled={flow.submitting}>
+            {flow.submitting ? "Updating..." : "Submit New Password"}
+          </button>
+        </form>
+      ) : null}
+    </>
+  );
+}
+
+function AuthPage({ mode, authSnapshot, onAuthenticated, onBackHome, onGoAdmin }) {
+  const initialView = mode === ROUTES.signup ? "signup" : "login";
+  const flow = useAuthFlow({
+    initialView,
+    authSnapshot,
+    onAuthenticated: async () => {
+      await onAuthenticated();
+      goToRoute(ROUTES.app);
+    },
+  });
+
+  return (
+    <main className="auth-shell">
+      <div className="auth-glow auth-glow-left" />
+      <div className="auth-glow auth-glow-right" />
+
+      <header className="auth-topbar">
+        <button type="button" className="auth-brand" onClick={onBackHome}>
+          <i className="fas fa-cube" />
+          <span>CryptoByte Pro</span>
+        </button>
+
+        <div className="auth-topbar-actions">
+          <button type="button" className="btn btn-ghost" onClick={onGoAdmin}>
+            Admin URL
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onBackHome}>
+            Back to Home
+          </button>
+        </div>
+      </header>
+
+      <section className="auth-main">
+        <div className="auth-showcase">
+          <p className="auth-badge">Secure Crypto Access</p>
+          <h1>Web and mobile now share one verified account system.</h1>
+          <p>
+            Name-based signup, email OTP verification, 6-digit user IDs, encrypted password
+            storage, and full forgot-password recovery are all connected to the backend.
+          </p>
+
+          <div className="auth-metrics">
+            <div>
+              <strong>Email OTP</strong>
+              <span>Signup Verification</span>
+            </div>
+            <div>
+              <strong>6-Digit ID</strong>
+              <span>Permanent User ID</span>
+            </div>
+            <div>
+              <strong>Bcrypt</strong>
+              <span>Encrypted Passwords</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="auth-card-wrap">
+          <article className="auth-card">
+            <div className="auth-switch">
+              <button
+                type="button"
+                className={flow.view === "login" ? "active" : ""}
+                onClick={() => flow.setView("login")}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                className={flow.view === "signup" ? "active" : ""}
+                onClick={() => flow.setView("signup")}
+              >
+                Sign Up
+              </button>
+            </div>
+
+            <h2>{flow.heading}</h2>
+            <p className="auth-subtitle">{flow.subtitle}</p>
+
+            <AuthForms flow={flow} classes={webAuthClasses} />
+          </article>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AdminPanelPage({ onBackHome, onGoAuth }) {
+  return (
+    <main className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-logo">
+          <i className="fas fa-user-shield" />
+          <span>Admin Console</span>
+        </div>
+
+        <nav className="admin-nav">
+          <button type="button" className="active">
+            <i className="fas fa-chart-pie" />
+            Overview
+          </button>
+          <button type="button">
+            <i className="fas fa-users" />
+            Users
+          </button>
+          <button type="button">
+            <i className="fas fa-coins" />
+            Markets
+          </button>
+          <button type="button">
+            <i className="fas fa-shield-alt" />
+            Security
+          </button>
+        </nav>
+      </aside>
+
+      <section className="admin-main">
+        <header className="admin-header">
+          <div>
+            <p className="admin-eyebrow">Separate Admin URL</p>
+            <h1>CryptoByte Pro Admin Panel</h1>
+          </div>
+
+          <div className="admin-actions">
+            <button type="button" className="btn btn-ghost" onClick={onGoAuth}>
+              Open Auth Page
+            </button>
+            <button type="button" className="btn btn-primary" onClick={onBackHome}>
+              Back to Website
+            </button>
+          </div>
+        </header>
+
+        <div className="admin-grid">
+          <article>
+            <h3>Total Users</h3>
+            <p>512,490</p>
+            <span>+3.1% this week</span>
+          </article>
+          <article>
+            <h3>Pending Verifications</h3>
+            <p>1,248</p>
+            <span>Review queue prepared</span>
+          </article>
+          <article>
+            <h3>Security Alerts</h3>
+            <p>07</p>
+            <span>All low priority</span>
+          </article>
+          <article>
+            <h3>Daily Volume</h3>
+            <p>$2.4B</p>
+            <span>Stable liquidity</span>
+          </article>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MobileAuthPage({ authSnapshot, onAuthenticated }) {
+  const flow = useAuthFlow({
+    initialView: "login",
+    authSnapshot,
+    onAuthenticated,
+  });
+
+  return (
+    <main className="mobile-auth-shell">
+      <div className="mobile-crypto-bg" />
+      <div className="mobile-grid-overlay" />
+
+      <section className="mobile-auth-card">
+        <div className="mobile-auth-brand">
+          <i className="fas fa-coins" />
+          <span>CryptoByte</span>
+        </div>
+
+        <div className="mobile-auth-copy">
+          <p className="mobile-auth-kicker">Secure Mobile Access</p>
+          <h1>{flow.heading}</h1>
+          <p>{flow.subtitle}</p>
+        </div>
+
+        <div className="mobile-auth-tabs">
+          <button type="button" className={flow.view === "login" ? "active" : ""} onClick={() => flow.setView("login")}>
+            Login
+          </button>
+          <button type="button" className={flow.view === "signup" ? "active" : ""} onClick={() => flow.setView("signup")}>
+            Sign Up
+          </button>
+        </div>
+
+        <AuthForms flow={flow} classes={mobileAuthClasses} />
+
+        <div className="mobile-auth-footer">
+          <span>Database + email OTP active</span>
+          <span>Passwords are stored as encrypted hashes on the backend</span>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MobileDashboardPage({ user, onLogout }) {
+  return (
+    <main className="mobile-dashboard-shell">
+      <div className="mobile-dashboard-glow" />
+      <div className="mobile-dashboard-grid" />
+
+      <header className="mobile-dashboard-header">
+        <div>
+          <p className="mobile-dashboard-tag">User Dashboard</p>
+          <h1>Hello, {user.name || "Trader"}</h1>
+          <span>{user.email}</span>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={onLogout}>
+          Logout
+        </button>
+      </header>
+
+      <section className="mobile-dashboard-hero">
+        <p className="mobile-dashboard-label">Account Status</p>
+        <h2>Session active on this device</h2>
+        <span>User ID #{user.userId || "------"} is connected to your verified email account.</span>
+      </section>
+
+      <section className="mobile-dashboard-cards">
+        <article>
+          <h3>User ID</h3>
+          <p>{user.userId || "------"}</p>
+          <span>Your permanent 6-digit account ID</span>
+        </article>
+        <article>
+          <h3>Account Name</h3>
+          <p>{user.name || "Trader"}</p>
+          <span>Stored in the backend profile</span>
+        </article>
+        <article>
+          <h3>Email Status</h3>
+          <p>Verified</p>
+          <span>{user.email}</span>
+        </article>
+      </section>
+
+      <section className="mobile-dashboard-list">
+        <article>
+          <div>
+            <strong>Password security</strong>
+            <span>Encrypted bcrypt hash stored in the database</span>
+          </div>
+          <i className="fas fa-lock" />
+        </article>
+        <article>
+          <div>
+            <strong>Email recovery flow</strong>
+            <span>Forgot password uses email OTP verification</span>
+          </div>
+          <i className="fas fa-envelope-open-text" />
+        </article>
+      </section>
+    </main>
+  );
+}
+
+function MobileLoadingPage() {
+  return (
+    <main className="mobile-auth-shell">
+      <div className="mobile-crypto-bg" />
+      <div className="mobile-grid-overlay" />
+      <section className="mobile-auth-card mobile-auth-loading">
+        <div className="mobile-auth-brand">
+          <i className="fas fa-coins" />
+          <span>CryptoByte</span>
+        </div>
+        <div className="mobile-auth-copy">
+          <p className="mobile-auth-kicker">Secure Session</p>
+          <h1>Checking your account</h1>
+          <p>Please wait while we verify your saved login session.</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MobileAppFlowPage({ authSnapshot, onAuthChanged, authReady }) {
+  const handleLogout = async () => {
+    await getAuthService().logout({ sessionToken: authSnapshot.sessionToken });
+    await onAuthChanged();
+  };
+
+  if (!authReady) {
+    return <MobileLoadingPage />;
+  }
+
+  if (authSnapshot.hasAccount && authSnapshot.isLoggedIn) {
+    return <MobileDashboardPage user={authSnapshot} onLogout={handleLogout} />;
+  }
+
+  return <MobileAuthPage authSnapshot={authSnapshot} onAuthenticated={onAuthChanged} />;
+}
+
+function HomePage({ assets, stats, activeFaq, onFaqToggle, mobileMenuOpen, setMobileMenuOpen, canvasRef }) {
   return (
     <div>
       <nav className="navbar">
@@ -313,10 +1542,10 @@ function App() {
           </div>
 
           <div className="nav-actions">
-            <button type="button" className="btn btn-ghost">
+            <button type="button" className="btn btn-ghost" onClick={() => goToRoute(ROUTES.login)}>
               Login
             </button>
-            <button type="button" className="btn btn-primary">
+            <button type="button" className="btn btn-primary" onClick={() => goToRoute(ROUTES.signup)}>
               Start Trading
             </button>
           </div>
@@ -356,13 +1585,13 @@ function App() {
               </p>
 
               <div className="hero-actions">
-                <button type="button" className="btn btn-primary btn-large">
+                <button type="button" className="btn btn-primary btn-large" onClick={() => goToRoute(ROUTES.signup)}>
                   <i className="fas fa-rocket" />
                   Start Trading Now
                 </button>
-                <button type="button" className="btn btn-ghost btn-large">
+                <button type="button" className="btn btn-ghost btn-large" onClick={() => goToRoute(ROUTES.login)}>
                   <i className="fas fa-play" />
-                  Watch Demo
+                  Login
                 </button>
               </div>
 
@@ -444,9 +1673,7 @@ function App() {
         <div className="container">
           <div className="section-header">
             <h2 className="section-title">How It Works</h2>
-            <p className="section-description">
-              Get started with cryptocurrency trading in just 3 simple steps
-            </p>
+            <p className="section-description">Get started with crypto trading in just 3 simple steps</p>
           </div>
 
           <div className="steps-container">
@@ -475,8 +1702,7 @@ function App() {
             <div className="download-text-block">
               <h2 className="section-title">Trade Anywhere, Anytime</h2>
               <p className="section-description">
-                Download our mobile app and desktop application for seamless trading experience
-                across all your devices.
+                Download our mobile app and desktop application for seamless trading experience across all your devices.
               </p>
 
               <div className="download-buttons">
@@ -514,15 +1740,9 @@ function App() {
                     </div>
                     <div className="app-chart" />
                     <div className="app-actions">
-                      <button type="button" className="app-btn buy">
-                        Buy
-                      </button>
-                      <button type="button" className="app-btn sell">
-                        Sell
-                      </button>
-                      <button type="button" className="app-btn swap">
-                        Swap
-                      </button>
+                      <button type="button" className="app-btn buy">Buy</button>
+                      <button type="button" className="app-btn sell">Sell</button>
+                      <button type="button" className="app-btn swap">Swap</button>
                     </div>
                   </div>
                 </div>
@@ -536,19 +1756,13 @@ function App() {
         <div className="container">
           <div className="section-header">
             <h2 className="section-title">Frequently Asked Questions</h2>
-            <p className="section-description">
-              Get answers to the most common questions about our platform
-            </p>
+            <p className="section-description">Get answers to the most common questions about our platform</p>
           </div>
 
           <div className="faq-list">
             {faqs.map((faq, index) => (
               <div className={`faq-item ${activeFaq === index ? "active" : ""}`} key={faq.question}>
-                <button
-                  type="button"
-                  className="faq-question"
-                  onClick={() => setActiveFaq(activeFaq === index ? -1 : index)}
-                >
+                <button type="button" className="faq-question" onClick={() => onFaqToggle(index)}>
                   <span>{faq.question}</span>
                   <i className="fas fa-chevron-down" />
                 </button>
@@ -574,18 +1788,10 @@ function App() {
                 and professional tools.
               </p>
               <div className="social-links">
-                <a href="#home">
-                  <i className="fab fa-twitter" />
-                </a>
-                <a href="#home">
-                  <i className="fab fa-facebook" />
-                </a>
-                <a href="#home">
-                  <i className="fab fa-linkedin" />
-                </a>
-                <a href="#home">
-                  <i className="fab fa-telegram" />
-                </a>
+                <a href="#home"><i className="fab fa-twitter" /></a>
+                <a href="#home"><i className="fab fa-facebook" /></a>
+                <a href="#home"><i className="fab fa-linkedin" /></a>
+                <a href="#home"><i className="fab fa-telegram" /></a>
               </div>
             </div>
 
@@ -594,9 +1800,7 @@ function App() {
                 <div className="footer-section" key={section.title}>
                   <h4 className="footer-title">{section.title}</h4>
                   {section.links.map((link) => (
-                    <a href="#home" key={link}>
-                      {link}
-                    </a>
+                    <a href="#home" key={link}>{link}</a>
                   ))}
                 </div>
               ))}
@@ -616,6 +1820,311 @@ function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function App() {
+  const [route, setRoute] = useState(getRouteFromHash);
+  const [authSnapshot, setAuthSnapshot] = useState(readAuthSnapshot);
+  const [authReady, setAuthReady] = useState(() => !readAuthSnapshot().sessionToken);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [assets, setAssets] = useState(initialAssets);
+  const [activeFaq, setActiveFaq] = useState(0);
+  const [stats, setStats] = useState({ volume: 0, users: 0, uptime: 0 });
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setRoute(getRouteFromHash());
+      setMobileMenuOpen(false);
+      setAuthSnapshot(readAuthSnapshot());
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const refreshAuthSnapshot = async () => {
+    const snapshot = readAuthSnapshot();
+    if (!snapshot.sessionToken) {
+      setAuthSnapshot(snapshot);
+      setAuthReady(true);
+      return;
+    }
+
+    setAuthReady(false);
+    try {
+      const data = await getAuthService().getSession(snapshot.sessionToken);
+      storeAuthUser(data.user);
+      setAuthSnapshot(readAuthSnapshot());
+    } catch {
+      clearSessionToken();
+      setAuthSnapshot(readAuthSnapshot());
+    } finally {
+      setAuthReady(true);
+    }
+  };
+
+  useEffect(() => {
+    refreshAuthSnapshot();
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeAppRuntime()) {
+      return undefined;
+    }
+
+    let active = true;
+    const listenerPromise = CapacitorApp.addListener("appUrlOpen", async ({ url }) => {
+      if (!active || !isExpectedNativeCallbackUrl(url)) {
+        return;
+      }
+
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        return;
+      }
+
+      if (parsedUrl.searchParams.get("provider") !== "google") {
+        return;
+      }
+
+      const expectedState = consumeNativeGoogleState();
+      const receivedState = parsedUrl.searchParams.get("state") || "";
+      if (expectedState && receivedState !== expectedState) {
+        persistTransientAuthFeedback({ error: "Google sign-in state mismatch হয়েছে. আবার চেষ্টা করো." });
+        goToRoute(ROUTES.login);
+        setRoute(ROUTES.login);
+        return;
+      }
+
+      const callbackError = parsedUrl.searchParams.get("error") || "";
+      if (callbackError) {
+        persistTransientAuthFeedback({ error: callbackError });
+        goToRoute(ROUTES.login);
+        setRoute(ROUTES.login);
+        return;
+      }
+
+      const token = parsedUrl.searchParams.get("token") || "";
+      if (!token) {
+        persistTransientAuthFeedback({ error: "Google token পাওয়া যায়নি. আবার চেষ্টা করো." });
+        goToRoute(ROUTES.login);
+        setRoute(ROUTES.login);
+        return;
+      }
+
+      setAuthReady(false);
+      try {
+        await getAuthService().googleAuth({ token });
+        await refreshAuthSnapshot();
+        goToRoute(ROUTES.app);
+        setRoute(ROUTES.app);
+      } catch (error) {
+        persistTransientAuthFeedback({ error: error?.message || "Google authentication failed." });
+        clearSessionToken();
+        await refreshAuthSnapshot();
+        goToRoute(ROUTES.login);
+        setRoute(ROUTES.login);
+      } finally {
+        try {
+          await Browser.close();
+        } catch {
+          // Ignore browser close errors.
+        }
+        setAuthReady(true);
+      }
+    });
+
+    return () => {
+      active = false;
+      listenerPromise.then((listener) => listener.remove());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (route !== ROUTES.home) {
+      return undefined;
+    }
+
+    const sections = document.querySelectorAll("section, .feature-card");
+    sections.forEach((section, index) => {
+      section.classList.add("fade-in");
+      section.style.transitionDelay = `${index * 0.06}s`;
+    });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: "0px 0px -50px 0px" },
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [route]);
+
+  useEffect(() => {
+    if (route !== ROUTES.home) {
+      return undefined;
+    }
+
+    const targets = { volume: 2.4, users: 500, uptime: 99.9 };
+    const startedAt = performance.now();
+    let frameId = 0;
+
+    const animate = (time) => {
+      const progress = Math.min((time - startedAt) / 1800, 1);
+      setStats({
+        volume: Number((targets.volume * progress).toFixed(1)),
+        users: Math.round(targets.users * progress),
+        uptime: Number((targets.uptime * progress).toFixed(1)),
+      });
+
+      if (progress < 1) {
+        frameId = requestAnimationFrame(animate);
+      }
+    };
+
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
+  }, [route]);
+
+  useEffect(() => {
+    if (route !== ROUTES.home) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setAssets((current) =>
+        current.map((asset) => {
+          const changePercent = (Math.random() - 0.5) * 4;
+          return {
+            ...asset,
+            price: asset.price * (1 + changePercent / 100),
+            change: Number(changePercent.toFixed(2)),
+          };
+        }),
+      );
+    }, 3000);
+
+    return () => window.clearInterval(intervalId);
+  }, [route]);
+
+  useEffect(() => {
+    if (route !== ROUTES.home) {
+      return undefined;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return undefined;
+    }
+
+    const context = canvas.getContext("2d");
+    const points = Array.from({ length: 50 }, (_, index) => ({
+      x: (index / 49) * 100,
+      y: 50 + Math.sin(index * 0.3) * 20 + Math.random() * 10 - 5,
+    }));
+
+    const resizeAndDraw = () => {
+      const width = canvas.offsetWidth;
+      const height = canvas.offsetHeight;
+      canvas.width = width;
+      canvas.height = height;
+
+      context.clearRect(0, 0, width, height);
+      const gradient = context.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, "rgba(103, 126, 234, 0.8)");
+      gradient.addColorStop(1, "rgba(103, 126, 234, 0.1)");
+
+      context.beginPath();
+      context.moveTo(0, height);
+      points.forEach((point) => {
+        context.lineTo((point.x / 100) * width, (point.y / 100) * height);
+      });
+      context.lineTo(width, height);
+      context.closePath();
+      context.fillStyle = gradient;
+      context.fill();
+
+      context.beginPath();
+      points.forEach((point, index) => {
+        const x = (point.x / 100) * width;
+        const y = (point.y / 100) * height;
+        if (index === 0) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      });
+      context.strokeStyle = "#667eea";
+      context.lineWidth = 2;
+      context.stroke();
+    };
+
+    resizeAndDraw();
+    const chartInterval = window.setInterval(() => {
+      points.forEach((point) => {
+        point.y += (Math.random() - 0.5) * 3;
+        point.y = Math.max(15, Math.min(85, point.y));
+      });
+      resizeAndDraw();
+    }, 2000);
+
+    window.addEventListener("resize", resizeAndDraw);
+    return () => {
+      window.clearInterval(chartInterval);
+      window.removeEventListener("resize", resizeAndDraw);
+    };
+  }, [route]);
+
+  if (route === ROUTES.admin) {
+    return (
+      <AdminPanelPage
+        onBackHome={() => goToRoute(ROUTES.home)}
+        onGoAuth={() => goToRoute(ROUTES.login)}
+      />
+    );
+  }
+
+  if (route === ROUTES.app) {
+    return (
+      <MobileAppFlowPage
+        authSnapshot={authSnapshot}
+        onAuthChanged={refreshAuthSnapshot}
+        authReady={authReady}
+      />
+    );
+  }
+
+  if (route === ROUTES.login || route === ROUTES.signup) {
+    return (
+      <AuthPage
+        mode={route}
+        authSnapshot={authSnapshot}
+        onAuthenticated={refreshAuthSnapshot}
+        onBackHome={() => goToRoute(ROUTES.home)}
+        onGoAdmin={() => goToRoute(ROUTES.admin)}
+      />
+    );
+  }
+
+  return (
+    <HomePage
+      assets={assets}
+      stats={stats}
+      activeFaq={activeFaq}
+      onFaqToggle={(index) => setActiveFaq(activeFaq === index ? -1 : index)}
+      mobileMenuOpen={mobileMenuOpen}
+      setMobileMenuOpen={setMobileMenuOpen}
+      canvasRef={canvasRef}
+    />
   );
 }
 
