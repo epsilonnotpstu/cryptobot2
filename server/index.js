@@ -43,6 +43,13 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    first_name TEXT NOT NULL DEFAULT '',
+    last_name TEXT NOT NULL DEFAULT '',
+    mobile TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT NOT NULL DEFAULT '',
+    kyc_status TEXT NOT NULL DEFAULT 'pending',
+    auth_tag TEXT NOT NULL DEFAULT 'kyc-pending',
+    kyc_updated_at TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -74,11 +81,82 @@ db.exec(`
     consumed_at TEXT,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS kyc_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    certification TEXT NOT NULL,
+    ssn TEXT NOT NULL,
+    front_file_name TEXT NOT NULL,
+    front_file_data TEXT NOT NULL,
+    back_file_name TEXT NOT NULL,
+    back_file_data TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT NOT NULL DEFAULT '',
+    submitted_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT
+  );
 `);
 
+function ensureUserProfileColumns() {
+  const existingColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
+
+  if (!existingColumns.includes("first_name")) {
+    db.exec("ALTER TABLE users ADD COLUMN first_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!existingColumns.includes("last_name")) {
+    db.exec("ALTER TABLE users ADD COLUMN last_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!existingColumns.includes("mobile")) {
+    db.exec("ALTER TABLE users ADD COLUMN mobile TEXT NOT NULL DEFAULT ''");
+  }
+  if (!existingColumns.includes("avatar_url")) {
+    db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''");
+  }
+  if (!existingColumns.includes("kyc_status")) {
+    db.exec("ALTER TABLE users ADD COLUMN kyc_status TEXT NOT NULL DEFAULT 'pending'");
+  }
+  if (!existingColumns.includes("auth_tag")) {
+    db.exec("ALTER TABLE users ADD COLUMN auth_tag TEXT NOT NULL DEFAULT 'kyc-pending'");
+  }
+  if (!existingColumns.includes("kyc_updated_at")) {
+    db.exec("ALTER TABLE users ADD COLUMN kyc_updated_at TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+ensureUserProfileColumns();
+
 const createUserStatement = db.prepare(`
-  INSERT INTO users (user_id, name, email, password_hash, created_at)
-  VALUES (@userId, @name, @email, @passwordHash, @createdAt)
+  INSERT INTO users (
+    user_id,
+    name,
+    first_name,
+    last_name,
+    mobile,
+    avatar_url,
+    kyc_status,
+    auth_tag,
+    kyc_updated_at,
+    email,
+    password_hash,
+    created_at
+  )
+  VALUES (
+    @userId,
+    @name,
+    @firstName,
+    @lastName,
+    @mobile,
+    @avatarUrl,
+    @kycStatus,
+    @authTag,
+    @kycUpdatedAt,
+    @email,
+    @passwordHash,
+    @createdAt
+  )
 `);
 const insertOtpStatement = db.prepare(`
   INSERT INTO otp_codes (email, purpose, otp_hash, expires_at, created_at)
@@ -113,7 +191,8 @@ const insertSessionStatement = db.prepare(`
 `);
 const findSessionStatement = db.prepare(`
   SELECT sessions.id AS session_row_id, sessions.user_id AS session_user_id, sessions.expires_at AS session_expires_at,
-         users.user_id, users.name, users.email
+         users.user_id, users.name, users.first_name, users.last_name, users.mobile, users.avatar_url,
+         users.kyc_status, users.auth_tag, users.kyc_updated_at, users.email
   FROM sessions
   JOIN users ON users.user_id = sessions.user_id
   WHERE sessions.session_token_hash = ?
@@ -150,10 +229,113 @@ const updateUserPasswordStatement = db.prepare(`
   SET password_hash = ?
   WHERE email = ?
 `);
+const updateUserPasswordByUserIdStatement = db.prepare(`
+  UPDATE users
+  SET password_hash = ?
+  WHERE user_id = ?
+`);
+const updateUserProfileStatement = db.prepare(`
+  UPDATE users
+  SET name = @name,
+      first_name = @firstName,
+      last_name = @lastName,
+      mobile = @mobile,
+      avatar_url = @avatarUrl
+  WHERE user_id = @userId
+`);
+const updateUserKycStatusStatement = db.prepare(`
+  UPDATE users
+  SET kyc_status = @kycStatus,
+      auth_tag = @authTag,
+      kyc_updated_at = @kycUpdatedAt
+  WHERE user_id = @userId
+`);
+const insertKycSubmissionStatement = db.prepare(`
+  INSERT INTO kyc_submissions (
+    user_id,
+    full_name,
+    certification,
+    ssn,
+    front_file_name,
+    front_file_data,
+    back_file_name,
+    back_file_data,
+    status,
+    note,
+    submitted_at,
+    reviewed_at,
+    reviewed_by
+  )
+  VALUES (
+    @userId,
+    @fullName,
+    @certification,
+    @ssn,
+    @frontFileName,
+    @frontFileData,
+    @backFileName,
+    @backFileData,
+    @status,
+    @note,
+    @submittedAt,
+    @reviewedAt,
+    @reviewedBy
+  )
+`);
+const findKycSubmissionByIdStatement = db.prepare(`
+  SELECT * FROM kyc_submissions
+  WHERE id = ?
+`);
+const findLatestKycSubmissionByUserStatement = db.prepare(`
+  SELECT * FROM kyc_submissions
+  WHERE user_id = ?
+  ORDER BY id DESC
+  LIMIT 1
+`);
+const updateKycSubmissionReviewStatement = db.prepare(`
+  UPDATE kyc_submissions
+  SET status = @status,
+      note = @note,
+      reviewed_at = @reviewedAt,
+      reviewed_by = @reviewedBy
+  WHERE id = @id
+`);
+const countUsersStatement = db.prepare("SELECT COUNT(*) AS total FROM users");
+const countUsersByKycStatusStatement = db.prepare("SELECT COUNT(*) AS total FROM users WHERE kyc_status = ?");
+const findKycSubmissionWithUserByIdStatement = db.prepare(`
+  SELECT k.id, k.user_id, k.full_name, k.certification, k.ssn, k.front_file_name, k.back_file_name,
+         k.status, k.note, k.submitted_at, k.reviewed_at, k.reviewed_by,
+         u.name AS account_name, u.email AS account_email, u.kyc_status AS account_kyc_status,
+         u.auth_tag AS account_auth_tag
+  FROM kyc_submissions k
+  JOIN users u ON u.user_id = k.user_id
+  WHERE k.id = ?
+  LIMIT 1
+`);
+const listLatestKycSubmissionsStatement = db.prepare(`
+  SELECT k.id, k.user_id, k.full_name, k.certification, k.ssn, k.front_file_name, k.back_file_name,
+         k.status, k.note, k.submitted_at, k.reviewed_at, k.reviewed_by,
+         u.name AS account_name, u.email AS account_email, u.kyc_status AS account_kyc_status,
+         u.auth_tag AS account_auth_tag
+  FROM kyc_submissions k
+  JOIN users u ON u.user_id = k.user_id
+  WHERE k.id IN (
+    SELECT MAX(id)
+    FROM kyc_submissions
+    GROUP BY user_id
+  )
+  ORDER BY
+    CASE k.status
+      WHEN 'pending' THEN 0
+      WHEN 'rejected' THEN 1
+      ELSE 2
+    END,
+    k.submitted_at DESC
+`);
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
 
 const PORT = Number(process.env.PORT || 4000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -161,7 +343,17 @@ const APP_NAME = process.env.APP_NAME || "CryptoBot Prime";
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
 const RESET_TOKEN_TTL_MINUTES = Number(process.env.RESET_TOKEN_TTL_MINUTES || 15);
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 30);
+const TEST_KYC_FILE_MAX_BYTES = Number(process.env.TEST_KYC_FILE_MAX_BYTES || 350000);
 const HASH_SECRET = process.env.AUTH_HASH_SECRET || "cryptobot-dev-secret";
+const KYC_CERTIFICATIONS = new Set(["nid", "passport", "driving_license"]);
+const KYC_FILE_MIME_TYPES = new Set([
+  "image/jpg",
+  "image/jpeg",
+  "image/png",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
 const SHOULD_RETURN_DEV_OTP =
   process.env.DEV_RETURN_OTP_IN_RESPONSE === "true" || process.env.NODE_ENV !== "production";
 
@@ -334,6 +526,166 @@ function assertValidEmail(email = "") {
   }
 }
 
+function normalizePersonName(value = "") {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function splitFullName(fullName = "") {
+  const normalized = normalizePersonName(fullName);
+  if (!normalized) {
+    return { firstName: "", lastName: "" };
+  }
+
+  const parts = normalized.split(" ");
+  const firstName = parts.shift() || "";
+  const lastName = parts.join(" ");
+  return { firstName, lastName };
+}
+
+function buildDisplayName(firstName = "", lastName = "", fallbackName = "") {
+  const normalizedFirst = normalizePersonName(firstName);
+  const normalizedLast = normalizePersonName(lastName);
+  const joined = `${normalizedFirst} ${normalizedLast}`.trim();
+  if (joined) {
+    return joined;
+  }
+  return normalizePersonName(fallbackName);
+}
+
+function sanitizeMobile(mobile = "") {
+  return String(mobile || "").trim();
+}
+
+function sanitizeAvatarUrl(avatarUrl = "") {
+  return String(avatarUrl || "").trim();
+}
+
+function normalizeKycStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "authenticated" || normalized === "approved") {
+    return "authenticated";
+  }
+  if (normalized === "rejected" || normalized === "reject") {
+    return "rejected";
+  }
+  return "pending";
+}
+
+function deriveAuthTag(kycStatus) {
+  if (kycStatus === "authenticated") {
+    return "kyc-authenticated";
+  }
+  if (kycStatus === "rejected") {
+    return "kyc-rejected";
+  }
+  return "kyc-pending";
+}
+
+function normalizeCertification(value = "") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+  if (normalized === "driving_license" || normalized === "driving_licence") {
+    return "driving_license";
+  }
+  return normalized;
+}
+
+function sanitizeShortText(value = "", maxLength = 240) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function parseKycFileData(rawData = "", sectionLabel = "file") {
+  const normalized = String(rawData || "").trim();
+  const match = normalized.match(/^data:([^;,]+);base64,([a-zA-Z0-9+/=]+)$/);
+
+  if (!match) {
+    throw new Error(`${sectionLabel} file data is invalid. Please upload again.`);
+  }
+
+  const mimeType = match[1].toLowerCase();
+  if (!KYC_FILE_MIME_TYPES.has(mimeType)) {
+    throw new Error(`${sectionLabel} file type is not supported.`);
+  }
+
+  const base64Body = match[2];
+  const bytes = Buffer.byteLength(base64Body, "base64");
+  return {
+    mimeType,
+    bytes,
+  };
+}
+
+function buildKycSubmissionPayload(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    requestId: row.id,
+    userId: row.user_id,
+    fullName: row.full_name,
+    certification: row.certification,
+    ssn: row.ssn,
+    frontFileName: row.front_file_name,
+    backFileName: row.back_file_name,
+    status: normalizeKycStatus(row.status),
+    note: row.note || "",
+    submittedAt: row.submitted_at || "",
+    reviewedAt: row.reviewed_at || "",
+    reviewedBy: row.reviewed_by || "",
+  };
+}
+
+function buildKycAdminPayload(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    requestId: row.id,
+    userId: row.user_id,
+    fullName: row.full_name,
+    certification: row.certification,
+    ssn: row.ssn,
+    frontFileName: row.front_file_name,
+    backFileName: row.back_file_name,
+    status: normalizeKycStatus(row.status),
+    note: row.note || "",
+    submittedAt: row.submitted_at || "",
+    reviewedAt: row.reviewed_at || "",
+    reviewedBy: row.reviewed_by || "",
+    accountName: row.account_name || "",
+    accountEmail: row.account_email || "",
+    accountKycStatus: normalizeKycStatus(row.account_kyc_status),
+    accountAuthTag: row.account_auth_tag || deriveAuthTag(normalizeKycStatus(row.account_kyc_status)),
+  };
+}
+
+function buildUserPayload(user = {}) {
+  const firstName = normalizePersonName(user.first_name || "");
+  const lastName = normalizePersonName(user.last_name || "");
+  const name = buildDisplayName(firstName, lastName, user.name || "");
+  const kycStatus = normalizeKycStatus(user.kyc_status || "");
+  const authTag = sanitizeShortText(user.auth_tag || deriveAuthTag(kycStatus), 60) || deriveAuthTag(kycStatus);
+
+  return {
+    userId: user.user_id || "",
+    name,
+    firstName,
+    lastName,
+    mobile: sanitizeMobile(user.mobile || ""),
+    avatarUrl: sanitizeAvatarUrl(user.avatar_url || ""),
+    kycStatus,
+    authTag,
+    isKycAuthenticated: kycStatus === "authenticated",
+    kycUpdatedAt: user.kyc_updated_at || "",
+    email: user.email || "",
+  };
+}
+
 function createUniqueUserId() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const candidate = String(crypto.randomInt(100000, 1000000));
@@ -389,9 +741,7 @@ function requireSession(req, res, next) {
   }
 
   req.currentUser = {
-    userId: session.user_id,
-    name: session.name,
-    email: session.email,
+    ...buildUserPayload(session),
   };
   req.sessionToken = sessionToken;
   next();
@@ -402,7 +752,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: APP_NAME });
 });
 
-app.post("/api/auth/signup/send-otp", async (req, res) => {
+async function handleSignupSendOtp(req, res) {
   try {
     cleanupExpiredRecords();
     const email = normalizeEmail(req.body.email);
@@ -452,9 +802,9 @@ app.post("/api/auth/signup/send-otp", async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: normalizeEmailServiceError(error) });
   }
-});
+}
 
-app.post("/api/auth/signup/complete", async (req, res) => {
+async function handleSignupComplete(req, res) {
   try {
     cleanupExpiredRecords();
     const name = req.body.name?.trim() || "";
@@ -476,29 +826,38 @@ app.post("/api/auth/signup/complete", async (req, res) => {
     verifyOtp({ email, purpose: "signup", otp });
 
     const userId = createUniqueUserId();
+    const splitName = splitFullName(name);
     const passwordHash = await bcrypt.hash(password, 12);
     const createdAt = toIso(getNow());
 
     createUserStatement.run({
       userId,
       name,
+      firstName: splitName.firstName,
+      lastName: splitName.lastName,
+      mobile: "",
+      avatarUrl: "",
+      kycStatus: "pending",
+      authTag: "kyc-pending",
+      kycUpdatedAt: createdAt,
       email,
       passwordHash,
       createdAt,
     });
 
     const sessionToken = createSessionForUser(userId);
+    const createdUser = findUserByUserIdStatement.get(userId);
     res.json({
       message: "Account created successfully.",
       sessionToken,
-      user: { userId, name, email },
+      user: buildUserPayload(createdUser || { user_id: userId, name, email }),
     });
   } catch (error) {
     res.status(400).json({ error: error.message || "Signup failed." });
   }
-});
+}
 
-app.post("/api/auth/google", async (req, res) => {
+async function handleGoogleAuth(req, res) {
   try {
     if (!googleClient) {
       throw new Error("Google authentication is not configured on the server.");
@@ -520,47 +879,51 @@ app.post("/api/auth/google", async (req, res) => {
     if (payload.email_verified === false) {
       throw new Error("Google account email is not verified.");
     }
-    
+
     const email = normalizeEmail(payload.email);
     const name = payload.name || "Google User";
-    
+
     let user = findUserByEmailStatement.get(email);
     let isNewUser = false;
-    
+
     if (!user) {
       isNewUser = true;
       const userId = createUniqueUserId();
-      const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+      const splitName = splitFullName(name);
+      const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12);
       const createdAt = toIso(getNow());
-      
+
       createUserStatement.run({
         userId,
         name,
+        firstName: splitName.firstName,
+        lastName: splitName.lastName,
+        mobile: "",
+        avatarUrl: "",
+        kycStatus: "pending",
+        authTag: "kyc-pending",
+        kycUpdatedAt: createdAt,
         email,
         passwordHash,
         createdAt,
       });
       user = findUserByEmailStatement.get(email);
     }
-    
+
     const sessionToken = createSessionForUser(user.user_id);
     res.json({
       message: isNewUser ? "Account created successfully with Google." : "Login successful.",
       sessionToken,
-      user: {
-        userId: user.user_id,
-        name: user.name,
-        email: user.email,
-      },
+      user: buildUserPayload(user),
       isNewUser,
     });
   } catch (error) {
     console.error("Google Auth Error:", error);
     res.status(400).json({ error: error.message || "Google authentication failed." });
   }
-});
+}
 
-app.post("/api/auth/login", async (req, res) => {
+async function handleLogin(req, res) {
   try {
     cleanupExpiredRecords();
     const identifier = normalizeIdentifier(req.body.identifier);
@@ -583,27 +946,23 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       message: "Login successful.",
       sessionToken,
-      user: {
-        userId: user.user_id,
-        name: user.name,
-        email: user.email,
-      },
+      user: buildUserPayload(user),
     });
   } catch (error) {
     res.status(400).json({ error: error.message || "Login failed." });
   }
-});
+}
 
-app.get("/api/auth/session", requireSession, (req, res) => {
+function handleSession(req, res) {
   res.json({ user: req.currentUser });
-});
+}
 
-app.post("/api/auth/logout", requireSession, (req, res) => {
+function handleLogout(req, res) {
   deleteSessionStatement.run(createHash(req.sessionToken));
   res.json({ message: "Logged out." });
-});
+}
 
-app.post("/api/auth/password/lookup", async (req, res) => {
+async function handlePasswordLookup(req, res) {
   try {
     cleanupExpiredRecords();
     const identifier = normalizeIdentifier(req.body.identifier);
@@ -663,9 +1022,9 @@ app.post("/api/auth/password/lookup", async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: normalizeEmailServiceError(error) });
   }
-});
+}
 
-app.post("/api/auth/password/verify-otp", (req, res) => {
+function handlePasswordVerifyOtp(req, res) {
   try {
     cleanupExpiredRecords();
     const identifier = normalizeIdentifier(req.body.identifier);
@@ -703,9 +1062,9 @@ app.post("/api/auth/password/verify-otp", (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message || "OTP verification failed." });
   }
-});
+}
 
-app.post("/api/auth/password/reset", async (req, res) => {
+async function handlePasswordReset(req, res) {
   try {
     cleanupExpiredRecords();
     const resetToken = req.body.resetToken?.trim() || "";
@@ -738,7 +1097,318 @@ app.post("/api/auth/password/reset", async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message || "Could not reset password." });
   }
+}
+
+async function handleProfileUpdate(req, res) {
+  try {
+    cleanupExpiredRecords();
+    const firstName = normalizePersonName(req.body.firstName || "");
+    const lastName = normalizePersonName(req.body.lastName || "");
+    const mobile = sanitizeMobile(req.body.mobile || "");
+    const avatarUrl = sanitizeAvatarUrl(req.body.avatarUrl || "");
+
+    if (!firstName) {
+      throw new Error("First name is required.");
+    }
+    if (!lastName) {
+      throw new Error("Last name is required.");
+    }
+    if (mobile && !/^\+?[0-9]{6,16}$/.test(mobile)) {
+      throw new Error("Please enter a valid mobile number.");
+    }
+    if (avatarUrl.length > 1_500_000) {
+      throw new Error("Profile photo is too large.");
+    }
+
+    const displayName = buildDisplayName(firstName, lastName, req.currentUser?.name || "");
+    updateUserProfileStatement.run({
+      userId: req.currentUser.userId,
+      name: displayName || "Trader",
+      firstName,
+      lastName,
+      mobile,
+      avatarUrl,
+    });
+
+    const updatedUser = findUserByUserIdStatement.get(req.currentUser.userId);
+    res.json({
+      message: "Profile updated successfully.",
+      user: buildUserPayload(updatedUser),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not update profile." });
+  }
+}
+
+async function handlePasswordChange(req, res) {
+  try {
+    cleanupExpiredRecords();
+    const currentPassword = req.body.currentPassword || "";
+    const newPassword = req.body.newPassword || "";
+    const confirmPassword = req.body.confirmPassword || "";
+
+    if (!currentPassword) {
+      throw new Error("Current password is required.");
+    }
+    assertValidPassword(newPassword);
+    if (newPassword !== confirmPassword) {
+      throw new Error("New password and confirm password do not match.");
+    }
+
+    const currentUser = findUserByUserIdStatement.get(req.currentUser.userId);
+    if (!currentUser) {
+      throw new Error("User not found.");
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, currentUser.password_hash);
+    if (!passwordMatches) {
+      res.status(401).json({ error: "Current password is incorrect." });
+      return;
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+    updateUserPasswordByUserIdStatement.run(newPasswordHash, req.currentUser.userId);
+
+    res.json({ message: "Password updated successfully." });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not update password." });
+  }
+}
+
+function handleKycStatus(req, res) {
+  try {
+    cleanupExpiredRecords();
+    const currentUser = findUserByUserIdStatement.get(req.currentUser.userId);
+    const latestSubmission = findLatestKycSubmissionByUserStatement.get(req.currentUser.userId);
+
+    res.json({
+      user: buildUserPayload(currentUser || req.currentUser),
+      kyc: buildKycSubmissionPayload(latestSubmission),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not read KYC status." });
+  }
+}
+
+function handleKycSubmit(req, res) {
+  try {
+    cleanupExpiredRecords();
+
+    const fullName = normalizePersonName(req.body.fullName || "");
+    const certification = normalizeCertification(req.body.certification || "");
+    const ssn = sanitizeShortText(req.body.ssn || "", 60);
+    const frontFileName = sanitizeShortText(req.body.frontFileName || "front-file", 180);
+    const backFileName = sanitizeShortText(req.body.backFileName || "back-file", 180);
+    const frontFileData = String(req.body.frontFileData || "").trim();
+    const backFileData = String(req.body.backFileData || "").trim();
+
+    if (!fullName || fullName.length < 3) {
+      throw new Error("Full name must match your NID/Passport/Driving License.");
+    }
+
+    if (!KYC_CERTIFICATIONS.has(certification)) {
+      throw new Error("Please select NID, Passport, or Driving License.");
+    }
+
+    if (!ssn || ssn.length < 4) {
+      throw new Error("Please enter your serial number (SSN).");
+    }
+
+    if (!frontFileData || !backFileData) {
+      throw new Error("Front part and back part documents are required.");
+    }
+
+    const frontFileInfo = parseKycFileData(frontFileData, "Front part");
+    const backFileInfo = parseKycFileData(backFileData, "Back part");
+
+    if (frontFileInfo.bytes > TEST_KYC_FILE_MAX_BYTES || backFileInfo.bytes > TEST_KYC_FILE_MAX_BYTES) {
+      throw new Error(
+        "Testing phase: upload a smaller file. Premium backend DB হলে বড় সাইজ upload enable করা হবে.",
+      );
+    }
+
+    const submittedAt = toIso(getNow());
+    insertKycSubmissionStatement.run({
+      userId: req.currentUser.userId,
+      fullName,
+      certification,
+      ssn,
+      frontFileName,
+      frontFileData,
+      backFileName,
+      backFileData,
+      status: "pending",
+      note: "",
+      submittedAt,
+      reviewedAt: null,
+      reviewedBy: null,
+    });
+
+    updateUserKycStatusStatement.run({
+      userId: req.currentUser.userId,
+      kycStatus: "pending",
+      authTag: deriveAuthTag("pending"),
+      kycUpdatedAt: submittedAt,
+    });
+
+    const updatedUser = findUserByUserIdStatement.get(req.currentUser.userId);
+    const latestSubmission = findLatestKycSubmissionByUserStatement.get(req.currentUser.userId);
+
+    res.json({
+      message: "Submitted successfully. KYC is now pending admin review.",
+      user: buildUserPayload(updatedUser || req.currentUser),
+      kyc: buildKycSubmissionPayload(latestSubmission),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not submit KYC." });
+  }
+}
+
+function handleAdminKycList(_req, res) {
+  try {
+    cleanupExpiredRecords();
+    const rows = listLatestKycSubmissionsStatement.all();
+    const pending = countUsersByKycStatusStatement.get("pending")?.total || 0;
+    const authenticated = countUsersByKycStatusStatement.get("authenticated")?.total || 0;
+    const rejected = countUsersByKycStatusStatement.get("rejected")?.total || 0;
+    const totalUsers = countUsersStatement.get()?.total || 0;
+
+    res.json({
+      stats: {
+        totalUsers,
+        pendingVerifications: pending,
+        authenticatedUsers: authenticated,
+        rejectedUsers: rejected,
+      },
+      requests: rows.map((row) => buildKycAdminPayload(row)),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not load KYC requests." });
+  }
+}
+
+function handleAdminKycReview(req, res) {
+  try {
+    cleanupExpiredRecords();
+    const requestId = Number(req.body.requestId);
+    const decision = normalizeKycStatus(req.body.decision || "");
+    const note = sanitizeShortText(req.body.note || "", 300);
+
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      throw new Error("Valid requestId is required.");
+    }
+    if (decision !== "authenticated" && decision !== "rejected") {
+      throw new Error("Decision must be authenticated or rejected.");
+    }
+
+    const submission = findKycSubmissionByIdStatement.get(requestId);
+    if (!submission) {
+      res.status(404).json({ error: "KYC request not found." });
+      return;
+    }
+
+    const reviewedAt = toIso(getNow());
+    updateKycSubmissionReviewStatement.run({
+      id: requestId,
+      status: decision,
+      note,
+      reviewedAt,
+      reviewedBy: "admin",
+    });
+
+    updateUserKycStatusStatement.run({
+      userId: submission.user_id,
+      kycStatus: decision,
+      authTag: deriveAuthTag(decision),
+      kycUpdatedAt: reviewedAt,
+    });
+
+    const updatedUser = findUserByUserIdStatement.get(submission.user_id);
+    const reviewedRequest = findKycSubmissionWithUserByIdStatement.get(requestId);
+
+    res.json({
+      message: decision === "authenticated" ? "User is now authenticated." : "KYC request rejected.",
+      user: buildUserPayload(updatedUser || { user_id: submission.user_id }),
+      request: buildKycAdminPayload(reviewedRequest),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Could not review KYC request." });
+  }
+}
+
+app.post("/api/auth/gateway", async (req, res) => {
+  const action = String(req.body?.action || "").trim().toLowerCase();
+
+  switch (action) {
+    case "signup.send-otp":
+      await handleSignupSendOtp(req, res);
+      return;
+    case "signup.complete":
+      await handleSignupComplete(req, res);
+      return;
+    case "google":
+      await handleGoogleAuth(req, res);
+      return;
+    case "login":
+      await handleLogin(req, res);
+      return;
+    case "session":
+      requireSession(req, res, () => handleSession(req, res));
+      return;
+    case "logout":
+      requireSession(req, res, () => handleLogout(req, res));
+      return;
+    case "password.lookup":
+      await handlePasswordLookup(req, res);
+      return;
+    case "password.verify-otp":
+      handlePasswordVerifyOtp(req, res);
+      return;
+    case "password.reset":
+      await handlePasswordReset(req, res);
+      return;
+    case "profile.update":
+      requireSession(req, res, async () => {
+        await handleProfileUpdate(req, res);
+      });
+      return;
+    case "password.change":
+      requireSession(req, res, async () => {
+        await handlePasswordChange(req, res);
+      });
+      return;
+    case "kyc.submit":
+      requireSession(req, res, () => handleKycSubmit(req, res));
+      return;
+    case "kyc.status":
+      requireSession(req, res, () => handleKycStatus(req, res));
+      return;
+    case "admin.kyc.list":
+      handleAdminKycList(req, res);
+      return;
+    case "admin.kyc.review":
+      handleAdminKycReview(req, res);
+      return;
+    default:
+      res.status(400).json({ error: "Unknown auth action." });
+  }
 });
+
+app.post("/api/auth/signup/send-otp", handleSignupSendOtp);
+app.post("/api/auth/signup/complete", handleSignupComplete);
+app.post("/api/auth/google", handleGoogleAuth);
+app.post("/api/auth/login", handleLogin);
+app.get("/api/auth/session", requireSession, handleSession);
+app.post("/api/auth/logout", requireSession, handleLogout);
+app.post("/api/auth/password/lookup", handlePasswordLookup);
+app.post("/api/auth/password/verify-otp", handlePasswordVerifyOtp);
+app.post("/api/auth/password/reset", handlePasswordReset);
+app.post("/api/auth/profile", requireSession, handleProfileUpdate);
+app.post("/api/auth/password/change", requireSession, handlePasswordChange);
+app.post("/api/auth/kyc", requireSession, handleKycSubmit);
+app.get("/api/auth/kyc", requireSession, handleKycStatus);
+app.get("/api/admin/kyc", handleAdminKycList);
+app.post("/api/admin/kyc/review", handleAdminKycReview);
 
 const isExecutedDirectly = (() => {
   if (!process.argv[1]) {

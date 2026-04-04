@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
+import PremiumDashboardPage from "./features/dashboard/PremiumDashboardPage";
 
 const ROUTES = {
   home: "/",
@@ -180,6 +181,14 @@ function readAuthSnapshot() {
       hasAccount: false,
       isLoggedIn: false,
       name: "",
+      firstName: "",
+      lastName: "",
+      mobile: "",
+      avatarUrl: "",
+      kycStatus: "pending",
+      authTag: "kyc-pending",
+      isKycAuthenticated: false,
+      kycUpdatedAt: "",
       email: "",
       userId: "",
       sessionToken: "",
@@ -195,10 +204,40 @@ function readAuthSnapshot() {
   }
 
   const sessionToken = window.localStorage.getItem(AUTH_STORAGE_KEYS.session);
+  const normalizedName = parsedUser?.name ?? "";
+  const fallbackNameParts = normalizedName.trim().split(/\s+/).filter(Boolean);
+  const fallbackFirstName = fallbackNameParts[0] || "";
+  const fallbackLastName = fallbackNameParts.slice(1).join(" ");
+  const normalizedKycStatus = (() => {
+    const value = String(parsedUser?.kycStatus || "pending").toLowerCase();
+    if (value === "authenticated" || value === "approved") {
+      return "authenticated";
+    }
+    if (value === "rejected" || value === "reject") {
+      return "rejected";
+    }
+    return "pending";
+  })();
+  const authTag =
+    parsedUser?.authTag ||
+    (normalizedKycStatus === "authenticated"
+      ? "kyc-authenticated"
+      : normalizedKycStatus === "rejected"
+        ? "kyc-rejected"
+        : "kyc-pending");
+
   return {
     hasAccount: Boolean(parsedUser?.email || parsedUser?.userId),
     isLoggedIn: Boolean(sessionToken),
-    name: parsedUser?.name ?? "",
+    name: normalizedName,
+    firstName: parsedUser?.firstName ?? fallbackFirstName,
+    lastName: parsedUser?.lastName ?? fallbackLastName,
+    mobile: parsedUser?.mobile ?? "",
+    avatarUrl: parsedUser?.avatarUrl ?? "",
+    kycStatus: normalizedKycStatus,
+    authTag,
+    isKycAuthenticated: normalizedKycStatus === "authenticated",
+    kycUpdatedAt: parsedUser?.kycUpdatedAt ?? "",
     email: parsedUser?.email ?? "",
     userId: parsedUser?.userId ?? "",
     sessionToken: sessionToken ?? "",
@@ -315,9 +354,21 @@ function consumeNativeGoogleState() {
   return value;
 }
 
-function pushCandidate(list, value) {
+function pushCandidate(list, value, options = {}) {
+  const allowEmpty = Boolean(options.allowEmpty);
   const normalized = (value || "").trim().replace(/\/+$/, "");
-  if (!normalized || list.includes(normalized)) {
+  if (!normalized && !allowEmpty) {
+    return;
+  }
+
+  if (!normalized && allowEmpty) {
+    if (!list.includes("")) {
+      list.push("");
+    }
+    return;
+  }
+
+  if (list.includes(normalized)) {
     return;
   }
   list.push(normalized);
@@ -331,7 +382,7 @@ function getApiBaseCandidates() {
 
   if (typeof window !== "undefined") {
     if (!isNativeAppRuntime()) {
-      pushCandidate(candidates, "");
+      pushCandidate(candidates, "", { allowEmpty: true });
 
       if (localHost) {
         pushCandidate(candidates, storedBase);
@@ -557,46 +608,56 @@ async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}
 }
 
 const remoteAuthService = {
-  async sendSignupOtp({ name, email }) {
-    return requestAuth("/api/auth/signup/send-otp", {
+  async requestGatewayAction({ action, payload = {}, sessionToken }) {
+    return requestAuth("/api/auth/gateway", {
       method: "POST",
-      body: { name, email },
+      sessionToken,
+      body: { action, ...payload },
+    });
+  },
+  async sendSignupOtp({ name, email }) {
+    return this.requestGatewayAction({
+      action: "signup.send-otp",
+      payload: { name, email },
     });
   },
   async signup({ name, email, otp, password }) {
-    const data = await requestAuth("/api/auth/signup/complete", {
-      method: "POST",
-      body: { name, email, otp, password },
+    const data = await this.requestGatewayAction({
+      action: "signup.complete",
+      payload: { name, email, otp, password },
     });
     storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
     return data;
   },
   async login({ identifier, password }) {
-    const data = await requestAuth("/api/auth/login", {
-      method: "POST",
-      body: { identifier, password },
+    const data = await this.requestGatewayAction({
+      action: "login",
+      payload: { identifier, password },
     });
     storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
     return data;
   },
   async googleAuth({ token }) {
-    const data = await requestAuth("/api/auth/google", {
-      method: "POST",
-      body: { token },
+    const data = await this.requestGatewayAction({
+      action: "google",
+      payload: { token },
     });
     storeAuthenticatedUser({ user: data.user, sessionToken: data.sessionToken });
     return data;
   },
   async getSession(sessionToken) {
-    const data = await requestAuth("/api/auth/session", { sessionToken });
+    const data = await this.requestGatewayAction({
+      action: "session",
+      sessionToken,
+    });
     storeAuthUser(data.user);
     return data;
   },
   async logout({ sessionToken }) {
     if (sessionToken) {
       try {
-        await requestAuth("/api/auth/logout", {
-          method: "POST",
+        await this.requestGatewayAction({
+          action: "logout",
           sessionToken,
         });
       } catch {
@@ -606,21 +667,92 @@ const remoteAuthService = {
     clearSessionToken();
   },
   async requestPasswordReset({ identifier }) {
-    return requestAuth("/api/auth/password/lookup", {
-      method: "POST",
-      body: { identifier },
+    return this.requestGatewayAction({
+      action: "password.lookup",
+      payload: { identifier },
     });
   },
   async verifyPasswordResetOtp({ identifier, otp }) {
-    return requestAuth("/api/auth/password/verify-otp", {
-      method: "POST",
-      body: { identifier, otp },
+    return this.requestGatewayAction({
+      action: "password.verify-otp",
+      payload: { identifier, otp },
     });
   },
   async resetPassword({ resetToken, password, confirmPassword }) {
-    return requestAuth("/api/auth/password/reset", {
-      method: "POST",
-      body: { resetToken, password, confirmPassword },
+    return this.requestGatewayAction({
+      action: "password.reset",
+      payload: { resetToken, password, confirmPassword },
+    });
+  },
+  async updateProfile({ sessionToken, firstName, lastName, mobile, avatarUrl }) {
+    const data = await this.requestGatewayAction({
+      action: "profile.update",
+      sessionToken,
+      payload: { firstName, lastName, mobile, avatarUrl },
+    });
+    if (data?.user) {
+      storeAuthUser(data.user);
+    }
+    return data;
+  },
+  async changePassword({ sessionToken, currentPassword, newPassword, confirmPassword }) {
+    return this.requestGatewayAction({
+      action: "password.change",
+      sessionToken,
+      payload: { currentPassword, newPassword, confirmPassword },
+    });
+  },
+  async submitKyc({
+    sessionToken,
+    fullName,
+    certification,
+    ssn,
+    frontFileName,
+    frontFileData,
+    backFileName,
+    backFileData,
+  }) {
+    const data = await this.requestGatewayAction({
+      action: "kyc.submit",
+      sessionToken,
+      payload: {
+        fullName,
+        certification,
+        ssn,
+        frontFileName,
+        frontFileData,
+        backFileName,
+        backFileData,
+      },
+    });
+    if (data?.user) {
+      storeAuthUser(data.user);
+    }
+    return data;
+  },
+  async getKycStatus({ sessionToken }) {
+    const data = await this.requestGatewayAction({
+      action: "kyc.status",
+      sessionToken,
+    });
+    if (data?.user) {
+      storeAuthUser(data.user);
+    }
+    return data;
+  },
+  async adminListKycRequests() {
+    return this.requestGatewayAction({
+      action: "admin.kyc.list",
+    });
+  },
+  async adminReviewKycRequest({ requestId, decision, note }) {
+    return this.requestGatewayAction({
+      action: "admin.kyc.review",
+      payload: {
+        requestId,
+        decision,
+        note,
+      },
     });
   },
 };
@@ -1364,7 +1496,93 @@ function AuthPage({ mode, authSnapshot, onAuthenticated, onBackHome, onGoAdmin }
   );
 }
 
+function formatAdminTime(isoString) {
+  if (!isoString) {
+    return "-";
+  }
+
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getAdminKycBadgeLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "authenticated" || normalized === "approved") {
+    return { text: "Authenticated", className: "is-authenticated" };
+  }
+  if (normalized === "rejected" || normalized === "reject") {
+    return { text: "Rejected", className: "is-rejected" };
+  }
+  return { text: "Pending", className: "is-pending" };
+}
+
 function AdminPanelPage({ onBackHome, onGoAuth }) {
+  const authService = getAuthService();
+  const [requests, setRequests] = useState([]);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    pendingVerifications: 0,
+    authenticatedUsers: 0,
+    rejectedUsers: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reviewingRequestId, setReviewingRequestId] = useState(null);
+
+  const loadKycRequests = async ({ withLoading = true } = {}) => {
+    if (withLoading) {
+      setLoading(true);
+    }
+    setError("");
+
+    try {
+      const data = await authService.adminListKycRequests();
+      setRequests(Array.isArray(data?.requests) ? data.requests : []);
+      setStats({
+        totalUsers: data?.stats?.totalUsers || 0,
+        pendingVerifications: data?.stats?.pendingVerifications || 0,
+        authenticatedUsers: data?.stats?.authenticatedUsers || 0,
+        rejectedUsers: data?.stats?.rejectedUsers || 0,
+      });
+    } catch (loadError) {
+      setError(loadError.message || "Could not load KYC requests.");
+    } finally {
+      if (withLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadKycRequests();
+  }, []);
+
+  const handleReview = async (requestId, decision) => {
+    setNotice("");
+    setError("");
+    setReviewingRequestId(requestId);
+    try {
+      const data = await authService.adminReviewKycRequest({ requestId, decision, note: "" });
+      setNotice(data?.message || "KYC status updated.");
+      await loadKycRequests({ withLoading: false });
+    } catch (reviewError) {
+      setError(reviewError.message || "Could not update KYC status.");
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
   return (
     <main className="admin-shell">
       <aside className="admin-sidebar">
@@ -1378,15 +1596,15 @@ function AdminPanelPage({ onBackHome, onGoAuth }) {
             <i className="fas fa-chart-pie" />
             Overview
           </button>
-          <button type="button">
-            <i className="fas fa-users" />
-            Users
+          <button type="button" className="active">
+            <i className="fas fa-id-card" />
+            KYC Requests
           </button>
-          <button type="button">
+          <button type="button" disabled>
             <i className="fas fa-coins" />
             Markets
           </button>
-          <button type="button">
+          <button type="button" disabled>
             <i className="fas fa-shield-alt" />
             Security
           </button>
@@ -1413,25 +1631,103 @@ function AdminPanelPage({ onBackHome, onGoAuth }) {
         <div className="admin-grid">
           <article>
             <h3>Total Users</h3>
-            <p>512,490</p>
-            <span>+3.1% this week</span>
+            <p>{stats.totalUsers}</p>
+            <span>Registered accounts</span>
           </article>
           <article>
             <h3>Pending Verifications</h3>
-            <p>1,248</p>
-            <span>Review queue prepared</span>
+            <p>{stats.pendingVerifications}</p>
+            <span>Needs review</span>
           </article>
           <article>
-            <h3>Security Alerts</h3>
-            <p>07</p>
-            <span>All low priority</span>
+            <h3>Authenticated</h3>
+            <p>{stats.authenticatedUsers}</p>
+            <span>KYC approved users</span>
           </article>
           <article>
-            <h3>Daily Volume</h3>
-            <p>$2.4B</p>
-            <span>Stable liquidity</span>
+            <h3>Rejected</h3>
+            <p>{stats.rejectedUsers}</p>
+            <span>Review failed</span>
           </article>
         </div>
+
+        <section className="admin-kyc-board">
+          <div className="admin-kyc-board-header">
+            <h2>KYC Submission Queue</h2>
+            <button type="button" className="btn btn-ghost" onClick={() => loadKycRequests()} disabled={loading}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+
+          {notice ? <p className="admin-kyc-notice">{notice}</p> : null}
+          {error ? <p className="admin-kyc-error">{error}</p> : null}
+
+          {loading ? <p className="admin-kyc-empty">Loading KYC requests...</p> : null}
+
+          {!loading && !requests.length ? (
+            <p className="admin-kyc-empty">No KYC submissions yet. User submit করলে এখানে auto show করবে.</p>
+          ) : null}
+
+          {!loading && requests.length ? (
+            <div className="admin-kyc-table-wrap">
+              <table className="admin-kyc-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Certification</th>
+                    <th>SSN</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requests.map((item) => {
+                    const badge = getAdminKycBadgeLabel(item.status);
+                    const isPending = badge.className === "is-pending";
+                    const isReviewing = reviewingRequestId === item.requestId;
+
+                    return (
+                      <tr key={item.requestId}>
+                        <td>
+                          <strong>{item.accountName || item.fullName || "User"}</strong>
+                          <span>{item.accountEmail || "-"}</span>
+                          <small>ID {item.userId}</small>
+                        </td>
+                        <td>{String(item.certification || "-").replaceAll("_", " ")}</td>
+                        <td>{item.ssn || "-"}</td>
+                        <td>
+                          <span className={`admin-kyc-badge ${badge.className}`}>{badge.text}</span>
+                        </td>
+                        <td>{formatAdminTime(item.submittedAt)}</td>
+                        <td>
+                          <div className="admin-kyc-actions">
+                            <button
+                              type="button"
+                              className="admin-approve-btn"
+                              disabled={!isPending || isReviewing}
+                              onClick={() => handleReview(item.requestId, "authenticated")}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-reject-btn"
+                              disabled={!isPending || isReviewing}
+                              onClick={() => handleReview(item.requestId, "rejected")}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
       </section>
     </main>
   );
@@ -1481,67 +1777,6 @@ function MobileAuthPage({ authSnapshot, onAuthenticated }) {
   );
 }
 
-function MobileDashboardPage({ user, onLogout }) {
-  return (
-    <main className="mobile-dashboard-shell">
-      <div className="mobile-dashboard-glow" />
-      <div className="mobile-dashboard-grid" />
-
-      <header className="mobile-dashboard-header">
-        <div>
-          <p className="mobile-dashboard-tag">User Dashboard</p>
-          <h1>Hello, {user.name || "Trader"}</h1>
-          <span>{user.email}</span>
-        </div>
-        <button type="button" className="btn btn-ghost" onClick={onLogout}>
-          Logout
-        </button>
-      </header>
-
-      <section className="mobile-dashboard-hero">
-        <p className="mobile-dashboard-label">Account Status</p>
-        <h2>Session active on this device</h2>
-        <span>User ID #{user.userId || "------"} is connected to your verified email account.</span>
-      </section>
-
-      <section className="mobile-dashboard-cards">
-        <article>
-          <h3>User ID</h3>
-          <p>{user.userId || "------"}</p>
-          <span>Your permanent 6-digit account ID</span>
-        </article>
-        <article>
-          <h3>Account Name</h3>
-          <p>{user.name || "Trader"}</p>
-          <span>Stored in the backend profile</span>
-        </article>
-        <article>
-          <h3>Email Status</h3>
-          <p>Verified</p>
-          <span>{user.email}</span>
-        </article>
-      </section>
-
-      <section className="mobile-dashboard-list">
-        <article>
-          <div>
-            <strong>Password security</strong>
-            <span>Encrypted bcrypt hash stored in the database</span>
-          </div>
-          <i className="fas fa-lock" />
-        </article>
-        <article>
-          <div>
-            <strong>Email recovery flow</strong>
-            <span>Forgot password uses email OTP verification</span>
-          </div>
-          <i className="fas fa-envelope-open-text" />
-        </article>
-      </section>
-    </main>
-  );
-}
-
 function MobileLoadingPage() {
   return (
     <main className="mobile-auth-shell">
@@ -1563,9 +1798,61 @@ function MobileLoadingPage() {
 }
 
 function MobileAppFlowPage({ authSnapshot, onAuthChanged, authReady }) {
+  const authService = getAuthService();
+
   const handleLogout = async () => {
-    await getAuthService().logout({ sessionToken: authSnapshot.sessionToken });
+    await authService.logout({ sessionToken: authSnapshot.sessionToken });
     await onAuthChanged();
+  };
+
+  const handleProfileUpdate = async ({ firstName, lastName, mobile, avatarUrl }) => {
+    const data = await authService.updateProfile({
+      sessionToken: authSnapshot.sessionToken,
+      firstName,
+      lastName,
+      mobile,
+      avatarUrl,
+    });
+    await onAuthChanged();
+    return data;
+  };
+
+  const handlePasswordChange = async ({ currentPassword, newPassword, confirmPassword }) => {
+    return authService.changePassword({
+      sessionToken: authSnapshot.sessionToken,
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    });
+  };
+
+  const handleKycSubmit = async ({
+    fullName,
+    certification,
+    ssn,
+    frontFileName,
+    frontFileData,
+    backFileName,
+    backFileData,
+  }) => {
+    const data = await authService.submitKyc({
+      sessionToken: authSnapshot.sessionToken,
+      fullName,
+      certification,
+      ssn,
+      frontFileName,
+      frontFileData,
+      backFileName,
+      backFileData,
+    });
+    await onAuthChanged();
+    return data;
+  };
+
+  const handleKycRefresh = async () => {
+    return authService.getKycStatus({
+      sessionToken: authSnapshot.sessionToken,
+    });
   };
 
   if (!authReady) {
@@ -1573,7 +1860,16 @@ function MobileAppFlowPage({ authSnapshot, onAuthChanged, authReady }) {
   }
 
   if (authSnapshot.hasAccount && authSnapshot.isLoggedIn) {
-    return <MobileDashboardPage user={authSnapshot} onLogout={handleLogout} />;
+    return (
+      <PremiumDashboardPage
+        user={authSnapshot}
+        onLogout={handleLogout}
+        onProfileUpdate={handleProfileUpdate}
+        onPasswordChange={handlePasswordChange}
+        onKycSubmit={handleKycSubmit}
+        onKycRefresh={handleKycRefresh}
+      />
+    );
   }
 
   return <MobileAuthPage authSnapshot={authSnapshot} onAuthenticated={onAuthChanged} />;

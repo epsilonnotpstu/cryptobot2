@@ -2,3 +2,143 @@
 .auth-link-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-top:.15rem}.auth-account-chip{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.8rem .9rem;margin-bottom:1rem;border-radius:14px;border:1px solid rgba(255,255,255,.14);background:#ffffff0d;color:var(--gray-300)}.auth-account-chip strong{color:#fff;font-size:.82rem}.password-field-row{position:relative}.password-field-row input{padding-right:5.3rem}.password-toggle-btn{position:absolute;top:50%;right:.5rem;transform:translateY(-50%);border:none;background:rgba(148,163,184,.15);color:#e2e8f0;border-radius:8px;padding:.45rem .7rem;font-size:.78rem;cursor:pointer}
 .auth-divider{display:flex;align-items:center;gap:.85rem;margin-top:1rem}.auth-divider:before,.auth-divider:after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(148,163,184,.45),transparent)}.auth-divider span{color:var(--app-text-muted);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase}.auth-social{display:grid;gap:.85rem}.auth-social-card{display:grid;gap:.55rem;padding:1rem;border-radius:16px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(150deg,rgba(255,255,255,.08),rgba(15,23,42,.18))}.auth-social-label{color:var(--app-text-strong);font-weight:600;font-size:.95rem}.auth-social-copy{color:var(--app-text-muted);font-size:.82rem;line-height:1.5}.auth-google-button{display:flex;justify-content:center;min-height:44px}.auth-google-button>div{width:100%!important;display:flex;justify-content:center}.auth-google-button iframe{max-width:100%}@media (max-width: 768px){.auth-social-card{padding:.85rem}.auth-google-button{justify-content:stretch}.auth-google-button>div{justify-content:stretch}}
 .auth-mobile-google-btn{justify-content:center;width:100%;margin-top:.25rem}
+
+.admin-kyc-board {
+	margin-top: var(--space-7, 1.75rem);
+	border-radius: 18px;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	background: rgba(255, 255, 255, 0.05);
+	padding: 1rem;
+}
+
+.admin-kyc-board-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	margin-bottom: 0.75rem;
+}
+
+.admin-kyc-board-header h2 {
+	margin: 0;
+	font-size: 1.2rem;
+}
+
+.admin-kyc-table-wrap {
+	overflow-x: auto;
+}
+
+.admin-kyc-table {
+	width: 100%;
+	border-collapse: collapse;
+	min-width: 760px;
+}
+
+.admin-kyc-table th,
+.admin-kyc-table td {
+	text-align: left;
+	padding: 0.65rem 0.5rem;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+	color: var(--gray-200);
+	vertical-align: top;
+}
+
+.admin-kyc-table th {
+	color: var(--gray-400);
+	font-size: 0.78rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.admin-kyc-table td strong,
+.admin-kyc-table td span,
+.admin-kyc-table td small {
+	display: block;
+}
+
+.admin-kyc-table td span {
+	color: var(--gray-400);
+	font-size: 0.82rem;
+}
+
+.admin-kyc-table td small {
+	color: var(--gray-500);
+	font-size: 0.75rem;
+}
+
+.admin-kyc-badge {
+	display: inline-flex;
+	align-items: center;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	font-size: 0.76rem;
+	padding: 0.22rem 0.6rem;
+}
+
+.admin-kyc-badge.is-pending {
+	background: rgba(250, 204, 21, 0.16);
+	border-color: rgba(250, 204, 21, 0.36);
+	color: #fde68a;
+}
+
+.admin-kyc-badge.is-authenticated {
+	background: rgba(16, 185, 129, 0.16);
+	border-color: rgba(16, 185, 129, 0.36);
+	color: #86efac;
+}
+
+.admin-kyc-badge.is-rejected {
+	background: rgba(244, 63, 94, 0.14);
+	border-color: rgba(244, 63, 94, 0.33);
+	color: #fda4af;
+}
+
+.admin-kyc-actions {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.admin-approve-btn,
+.admin-reject-btn {
+	border: none;
+	border-radius: 8px;
+	padding: 0.4rem 0.62rem;
+	font-size: 0.76rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.admin-approve-btn {
+	background: rgba(16, 185, 129, 0.2);
+	color: #86efac;
+}
+
+.admin-reject-btn {
+	background: rgba(244, 63, 94, 0.18);
+	color: #fda4af;
+}
+
+.admin-approve-btn:disabled,
+.admin-reject-btn:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.admin-kyc-notice,
+.admin-kyc-error,
+.admin-kyc-empty {
+	margin: 0 0 0.68rem;
+	font-size: 0.85rem;
+}
+
+.admin-kyc-notice {
+	color: #7dd3fc;
+}
+
+.admin-kyc-error {
+	color: #fda4af;
+}
+
+.admin-kyc-empty {
+	color: var(--gray-400);
+}
