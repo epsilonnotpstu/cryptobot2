@@ -497,10 +497,6 @@ function normalizeAuthErrorMessage(message = "") {
   if (/the page could not be found|not_found/i.test(message)) {
     return "Auth API route পাওয়া যায়নি. Vercel deploy-এ `api/auth/...` files include হয়েছে কিনা check করে redeploy করো.";
   }
-<<<<<<< HEAD
-
-=======
->>>>>>> recovered-updates
   if (/smtp|invalid login|535|sender/i.test(message)) {
     return "OTP email service configured হয়নি. SMTP login/key বা verified sender ঠিক করতে হবে, তারপর আবার চেষ্টা করো.";
   }
@@ -550,10 +546,7 @@ async function parseErrorPayload(response) {
     rawText: text,
   };
 }
-<<<<<<< HEAD
 
-=======
->>>>>>> recovered-updates
 async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}) {
   const candidates = getApiBaseCandidates();
   let lastNetworkError = null;
@@ -615,13 +608,63 @@ async function requestAuth(endpoint, { method = "GET", body, sessionToken } = {}
   throw new Error("Request failed.");
 }
 
+function shouldFallbackToLegacyAuthApi(error) {
+  const message = String(error?.message || "");
+  return /could not find an api backend at `\/api`|auth api route পাওয়া যায়নি|the page could not be found|not_found/i.test(
+    message,
+  );
+}
+
+const LEGACY_AUTH_ACTION_MAP = {
+  "signup.send-otp": { endpoint: "/api/auth/signup/send-otp", method: "POST" },
+  "signup.complete": { endpoint: "/api/auth/signup/complete", method: "POST" },
+  google: { endpoint: "/api/auth/google", method: "POST" },
+  login: { endpoint: "/api/auth/login", method: "POST" },
+  session: { endpoint: "/api/auth/session", method: "GET", requiresSession: true },
+  logout: { endpoint: "/api/auth/logout", method: "POST", requiresSession: true },
+  "password.lookup": { endpoint: "/api/auth/password/lookup", method: "POST" },
+  "password.verify-otp": { endpoint: "/api/auth/password/verify-otp", method: "POST" },
+  "password.reset": { endpoint: "/api/auth/password/reset", method: "POST" },
+  "profile.update": { endpoint: "/api/auth/profile", method: "POST", requiresSession: true },
+  "password.change": { endpoint: "/api/auth/password/change", method: "POST", requiresSession: true },
+  "kyc.submit": { endpoint: "/api/auth/kyc", method: "POST", requiresSession: true },
+  "kyc.status": { endpoint: "/api/auth/kyc", method: "GET", requiresSession: true },
+  "admin.kyc.list": { endpoint: "/api/admin/kyc", method: "GET" },
+  "admin.kyc.review": { endpoint: "/api/admin/kyc/review", method: "POST" },
+};
+
+async function requestLegacyAuthAction({ action, payload = {}, sessionToken }) {
+  const mapping = LEGACY_AUTH_ACTION_MAP[action];
+  if (!mapping) {
+    throw new Error(`Gateway auth action not supported by legacy route map: ${action}`);
+  }
+
+  return requestAuth(mapping.endpoint, {
+    method: mapping.method,
+    sessionToken: mapping.requiresSession ? sessionToken : undefined,
+    body: mapping.method === "GET" ? undefined : payload,
+  });
+}
+
 const remoteAuthService = {
   async requestGatewayAction({ action, payload = {}, sessionToken }) {
-    return requestAuth("/api/auth/gateway", {
-      method: "POST",
-      sessionToken,
-      body: { action, ...payload },
-    });
+    try {
+      return await requestAuth("/api/auth/gateway", {
+        method: "POST",
+        sessionToken,
+        body: { action, ...payload },
+      });
+    } catch (error) {
+      if (!shouldFallbackToLegacyAuthApi(error)) {
+        throw error;
+      }
+
+      return requestLegacyAuthAction({
+        action,
+        payload,
+        sessionToken,
+      });
+    }
   },
   async sendSignupOtp({ name, email }) {
     return this.requestGatewayAction({
