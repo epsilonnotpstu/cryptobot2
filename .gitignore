@@ -9,3 +9,4 @@ pnpm-debug.log*
 
 .env
 .idea/copilotDiffState.xml
+.env*.local
